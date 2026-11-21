@@ -1,0 +1,27 @@
+name: Deployment smoke check
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_url:
+        description: Public ResolveHub URL (HTTPS)
+        type: string
+        required: true
+        default: https://resolvehub-app.onrender.com
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DEPLOY_URL: ${{ inputs.deployment_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify deployed frontend, backend and session boundary
+        run: npm run smoke:deploy
