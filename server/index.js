@@ -7,6 +7,7 @@ import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
 import {query,transaction,initialize} from './db.js';
+import {seedDemoData} from './demo.js';
 import {newToken,digest,requireSecret} from './security.js';
 import {createRateLimiter} from './rate-limit.js';
 import {deadlines,addBusinessMinutes,businessMinutesBetween,fiveBusinessDays,budgets} from './sla.js';
@@ -27,6 +28,7 @@ async function customerTicket(req,lock=false,db={query}){const ticketId=parse(id
 const event=async(db,ticket,actor,actorId,type,meta={})=>db.query('INSERT INTO ticket_events(ticket_id,actor_type,actor_id,event_type,metadata) VALUES($1,$2,$3,$4,$5)',[ticket,actor,actorId,type,JSON.stringify(meta)]);
 async function details(ticketId,includeInternal=false){const [ticket,msg,events]=await Promise.all([query('SELECT t.*,a.name AS assignee_name FROM tickets t LEFT JOIN agents a ON a.id=t.assignee_id WHERE t.id=$1',[ticketId]),query('SELECT id,ticket_id,actor_type,actor_id,body,is_internal,created_at FROM messages WHERE ticket_id=$1 '+(includeInternal?'':'AND is_internal=false')+' ORDER BY created_at,id',[ticketId]),includeInternal?query('SELECT * FROM ticket_events WHERE ticket_id=$1 ORDER BY created_at,id',[ticketId]):Promise.resolve({rows:[]})]);if(!ticket.rows.length)throw fail(404,'Ticket not found');const t=ticket.rows[0];delete t.customer_token_hash;if(!includeInternal)delete t.remaining_resolution_ms;return {ticket:t,messages:msg.rows,events:events.rows};}
 app.get('/api/health',(_req,res)=>res.json({status:'ok'}));
+app.get('/api/demo/config',(_req,res)=>res.json({enabled:process.env.DEMO_MODE==='true' && !!process.env.DEMO_AGENT_PASSWORD}));
 app.post('/api/auth/login',loginLimit,asyncRoute(async(req,res)=>{const {email,password}=parse(z.object({email:z.string().email(),password:z.string().min(1)}),req.body);const {rows}=await query('SELECT * FROM agents WHERE email=$1',[email.toLowerCase()]);const valid=rows.length&&await bcrypt.compare(password,rows[0].password_hash);if(!valid)throw fail(401,'Invalid credentials');const token=newToken();await query('INSERT INTO sessions(token_hash,agent_id,expires_at) VALUES($1,$2,$3)',[digest(token),rows[0].id,new Date(Date.now()+SESSION_MS)]);res.cookie('rh_session',token,{...cookie,maxAge:SESSION_MS});res.json({agent:{id:rows[0].id,email:rows[0].email,name:rows[0].name}});}));
 app.post('/api/auth/logout',agent,asyncRoute(async(req,res)=>{await query('DELETE FROM sessions WHERE token_hash=$1',[digest(req.cookies.rh_session)]);res.clearCookie('rh_session',cookie);res.json({ok:true});}));
 app.get('/api/auth/me',agent,(req,res)=>res.json({agent:req.agent}));
@@ -50,4 +52,4 @@ app.post('/api/public/tickets/:id/reopen',publicActionLimit,asyncRoute(async(req
 app.use('/api',(_req,res)=>res.status(404).json({error:'Not found'}));
 const __dirname=dirname(fileURLToPath(import.meta.url));app.use(express.static(join(__dirname,'../dist')));app.get('*',(_req,res)=>res.sendFile(join(__dirname,'../dist/index.html')));
 app.use((err,_req,res,_next)=>{if(!err.status)console.error(err);res.status(err.status||500).json({error:err.status?err.message:'Internal server error'});});
-requireSecret();await initialize();app.listen(process.env.PORT||3001,()=>console.log('ResolveHub API started'));
+requireSecret();await initialize();await seedDemoData();app.listen(process.env.PORT||3001,()=>console.log('ResolveHub API started'));
