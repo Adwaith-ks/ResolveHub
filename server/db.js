@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {dirname,join} from 'node:path';
 import bcrypt from 'bcryptjs';
 const {Pool}=pg;
-const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.NODE_ENV==='production' ? {rejectUnauthorized:false}:undefined});
+const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.DATABASE_SSL==='true' ? {rejectUnauthorized:true}:undefined});
 export const query=(sql,params=[])=>pool.query(sql,params);
 export async function transaction(fn){const c=await pool.connect();try{await c.query('BEGIN');const val=await fn(c);await c.query('COMMIT');return val;}catch(err){await c.query('ROLLBACK');throw err;}finally{c.release();}}
 export async function initialize(){
