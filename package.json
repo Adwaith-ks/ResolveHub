@@ -1,1 +1,36 @@
-{"name":"resolvehub","private":true,"version":"1.0.0","type":"module","engines":{"node":">=20"},"scripts":{"dev":"concurrently -k \"npm:dev:server\" \"npm:dev:client\"","dev:server":"node --watch server/index.js","dev:client":"vite --host 0.0.0.0","build":"vite build","start":"node server/index.js","test":"node --test server/*.test.js","check":"npm test && npm run build"},"dependencies":{"bcryptjs":"^2.4.3","cookie-parser":"^1.4.7","dotenv":"^16.4.7","express":"^4.21.2","helmet":"^8.0.0","pg":"^8.13.1","react":"^19.0.0","react-dom":"^19.0.0","zod":"^3.24.2"},"devDependencies":{"@vitejs/plugin-react":"^4.3.4","concurrently":"^9.1.2","typescript":"^5.8.3","vite":"^6.1.0"}}
+{
+  "name": "resolvehub",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "node --watch server/index.js",
+    "dev:client": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "test": "node --test server/*.test.js",
+    "check": "npm test && npm run build",
+    "smoke:deploy": "node scripts/smoke-deployment.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "pg": "^8.13.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.3",
+    "vite": "^6.1.0"
+  }
+}
