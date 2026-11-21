@@ -61,6 +61,19 @@ The server creates the initial database schema and inserts an agent if the email
 
 Set `HOLIDAYS` to a comma-separated list of `YYYY-MM-DD` IST dates, if required.
 
+## Demonstration accounts and sample tickets
+
+This project supports **explicitly enabled demo data** for an Arvo Systems evaluator session. The fixture contains nine fictional agents and 36 fictional customer requests, including unassigned, assigned, waiting, resolved, closed, and overdue tickets. Every demo ticket starts with `[DEMO]`. Assigned tickets include sample public replies and some include private internal notes; the existing customer API still filters private messages.
+
+| Setting | Purpose |
+| --- | --- |
+| `DEMO_MODE=true` | Enable the opt-in demo dataset on server startup |
+| `DEMO_AGENT_PASSWORD` | Private shared password, **at least 12 characters**, for the nine demo users |
+
+The nine demo sign-in emails are `agent1@arvo.example` through `agent9@arvo.example`. Their password is the **private** `DEMO_AGENT_PASSWORD` set in Render (not a hardcoded public password). On the first startup after both settings are provided, demo tickets and agents are created in one transaction. A marker prevents duplicate sample tickets on later deploys. Existing tickets are not deleted.
+
+**To activate demo login on Render:** open the ResolveHub Blueprint and sync the updated `render.yaml`, configure `DEMO_AGENT_PASSWORD` privately on the web service, and redeploy if prompted. No demo login is available until these steps are complete. Do not enable this fixture in a service handling real customer data, since the demo accounts have full agent access. Use a separate disposable database or deployment for public demonstrations. Disable `DEMO_MODE` after the evaluation and rotate/revoke demo accounts before processing real customer information; disabling it alone does not delete previously seeded accounts.
+
 ## Render deployment
 
 **Live application:** [https://resolvehub-app.onrender.com](https://resolvehub-app.onrender.com)
