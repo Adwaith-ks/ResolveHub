@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
 import {query,transaction,initialize} from './db.js';
 import {newToken,digest,requireSecret} from './security.js';
-import {deadlines,addBusinessMinutes,businessMinutesBetween,fiveBusinessDays} from './sla.js';
+import {deadlines,addBusinessMinutes,businessMinutesBetween,fiveBusinessDays,budgets} from './sla.js';
 const app=express();app.disable('x-powered-by');app.use(helmet({contentSecurityPolicy:false}));app.use(express.json({limit:'32kb'}));app.use(cookieParser());
 const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
 const fail=(status,message)=>Object.assign(new Error(message),{status});
@@ -34,7 +34,7 @@ app.post('/api/public/tickets',asyncRoute((req,res)=>createTicket(req,res,'custo
 app.get('/api/public/tickets/:id',asyncRoute(async(req,res)=>{const t=await customerTicket(req);res.json(await details(t.id,false));}));
 app.post('/api/tickets/:id/claim',agent,asyncRoute(async(req,res)=>{const ticketId=parse(id,req.params.id);const {rows}=await transaction(async db=>{const out=await db.query("UPDATE tickets SET assignee_id=$1,status='in_progress',updated_at=now() WHERE id=$2 AND assignee_id IS NULL AND status='open' RETURNING id",[req.agent.id,ticketId]);if(out.rows.length)await event(db,ticketId,'agent',req.agent.id,'claimed');return out;});if(!rows.length)throw fail(409,'Ticket already claimed or unavailable');res.json({ok:true});}));
 app.patch('/api/tickets/:id',agent,asyncRoute(async(req,res)=>{const ticketId=parse(id,req.params.id);const change=parse(z.object({status:z.enum(['in_progress','waiting','resolved','closed']).optional(),priority:z.enum(['low','medium','high']).optional()}).refine(v=>v.status||v.priority,{message:'No change specified'}),req.body);await transaction(async db=>{const {rows}=await db.query('SELECT * FROM tickets WHERE id=$1 FOR UPDATE',[ticketId]);if(!rows.length)throw fail(404,'Ticket not found');const t=rows[0];if(String(t.assignee_id)!==String(req.agent.id))throw fail(403,'Only the assigned agent can change this ticket');if(t.status==='closed'||t.status==='resolved')throw fail(409,'Reopen before making changes');let nextStatus=change.status||t.status;if(change.status&&!({open:['in_progress','waiting','resolved'],in_progress:['waiting','resolved'],waiting:['in_progress','resolved']}[t.status]||[]).includes(change.status))throw fail(409,'Invalid status transition');const nextPriority=change.priority||t.priority;let due=t.resolution_due,remaining=t.remaining_resolution_ms,waiting=t.waiting_since,resolved=t.resolved_at,closed=t.closed_at;
-if(change.priority){due=deadlines(change.priority).resolution_due;remaining=null;}
+if(change.priority){if(t.status==='waiting'){due=null;remaining=budgets[change.priority].resolution*60000;}else{due=deadlines(change.priority).resolution_due;remaining=null;}}
 if(nextStatus==='waiting'&&t.status!=='waiting'){remaining=Math.max(0,businessMinutesBetween(new Date(),due))*60000;waiting=new Date();due=null;}
 if(t.status==='waiting'&&nextStatus==='in_progress'){due=addBusinessMinutes(new Date(),Math.ceil(Number(remaining||0)/60000));remaining=null;waiting=null;}
 if(nextStatus==='resolved'){resolved=new Date();waiting=null;remaining=null;}
