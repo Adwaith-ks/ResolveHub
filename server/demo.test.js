@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+// Configure the pool before importing demo.js in the first test.
+if (process.env.TEST_DATABASE_URL) process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+
 test('demo fixture requires explicit activation', async () => {
   const prior = process.env.DEMO_MODE;
   delete process.env.DEMO_MODE;
