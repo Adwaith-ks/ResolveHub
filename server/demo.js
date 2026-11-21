@@ -88,7 +88,7 @@ export async function seedDemoData() {
       const createdAt = new Date(now - (i % 12 + 1) * 86400000 - (i % 5) * 3600000);
       const responseAt = new Date(createdAt.getTime() + 35 * 60000);
       const d = deadlines(priority, createdAt);
-      const assignedId = status === 'open' ? null : agents[i % agents.length];
+      const assignedId = status === 'open' ? null : agents[(i + 1) % agents.length];
       const waitingAt = status === 'waiting' ? new Date(now - (i % 4 + 1) * 86400000) : null;
       const resolvedAt = ['resolved', 'closed'].includes(status) ? new Date(now - (i % 6 + 1) * 86400000) : null;
       const closedAt = status === 'closed' ? new Date(now - 86400000) : null;
