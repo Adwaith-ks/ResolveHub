@@ -200,14 +200,15 @@ function Dashboard({ agent, onLogout }) {
   const [notice, setNotice] = useState(null);
   const [mobileNav, setMobileNav] = useState(false);
   const [loadError, setLoadError] = useState('');
-  async function refresh() {
-    setLoading(true); setLoadError('');
+  async function refresh(silent = false) {
+    if (!silent) setLoading(true);
+    setLoadError('');
     try { setTickets((await api('/tickets')).tickets); }
     catch (error) { setLoadError(error.message); }
-    finally { setLoading(false); }
+    finally { if (!silent) setLoading(false); }
   }
-  useEffect(() => { refresh(); }, []);
-  useEffect(() => { const timer = setInterval(() => refresh(), 60000); return () => clearInterval(timer); }, []);
+  useEffect(() => { void refresh(); }, []);
+  useEffect(() => { const timer = setInterval(() => { void refresh(true); }, 60000); return () => clearInterval(timer); }, []);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(null), 5000); return () => clearTimeout(timer); }, [notice]);
   useEffect(() => { setPage(0); }, [filter, search, priority]);
   const notify = (message, isError = false) => setNotice({ message, isError });
