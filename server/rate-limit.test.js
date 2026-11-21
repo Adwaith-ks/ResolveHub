@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {createRateLimiter} from './rate-limit.js';
+function response(){return {headers:{},statusCode:200,body:null,setHeader(k,v){this.headers[k]=v},status(n){this.statusCode=n;return this},json(obj){this.body=obj;return this}};}
+test('limits calls by IP and returns retry-after',()=>{let time=1000;const middleware=createRateLimiter({limit:2,windowMs:10000,now:()=>time});const req={ip:'192.0.2.1'};const res=response();let allowed=0;for(let i=0;i<3;i++)middleware(req,res,()=>allowed++);assert.equal(allowed,2);assert.equal(res.statusCode,429);assert.equal(res.headers['Retry-After'],'10');time=11001;middleware(req,response(),()=>allowed++);assert.equal(allowed,3);});
+test('separates callers',()=>{const m=createRateLimiter({limit:1,windowMs:1000});let allowed=0;for(const ip of ['192.0.2.10','192.0.2.11'])m({ip},response(),()=>allowed++);assert.equal(allowed,2);});
