@@ -66,7 +66,9 @@ Set `HOLIDAYS` to a comma-separated list of `YYYY-MM-DD` IST dates, if required.
 
 ## Validation status and limitations
 
-The SLA and security unit tests passed in local Node.js execution. Full dependency installation, a complete frontend production build, database-backed integration tests, and live Render deployment have **not yet been verified**.
+GitHub Actions includes a disposable PostgreSQL 16 service for `TEST_DATABASE_URL`. CI runs `npm run check` with unit tests, database-backed API smoke coverage, and the Vite production build.
+
+The original six SLA and security unit tests passed in a local Node.js run. Additional request-throttling unit tests and a PostgreSQL-backed API lifecycle smoke test are now included in GitHub Actions, but their execution has **not yet been verified**. Local npm installation was blocked by network/DNS access, so the full production build and live Render deployment remain unverified.
 
 Before public production use, add login and public-ticket rate limiting, customer-token delivery, a versioned migration system, credential rotation, database-backed test coverage, and a scheduled job for expired customer waits. Confirm the final deployment's PostgreSQL TLS configuration.
 
