@@ -1,9 +1,9 @@
 # ResolveHub
 
-**Support with clarity.** ResolveHub is an independent full-stack solution to the same helpdesk challenge as [Frontdesk](https://github.com/abinavdev/Frontdesk): replacing a shared spreadsheet and chat with auditable ticket management for support agents.
+**Support with clarity.** ResolveHub is an independent support-ticket application replacing scattered spreadsheets and chat messages with auditable support workflows.
 
 ## Features
-- Custom dark-violet React dashboard with searchable ticket queues, metrics, detail panel, priority and status controls.
+- Restrained slate-and-teal React support workspace with searchable queues, operational metrics, priority filters, pagination, and a two-column ticket workspace.
 - Agent authentication with bcrypt-hashed passwords and opaque HttpOnly session cookies.
 - Race-safe claiming of unassigned tickets through a conditional PostgreSQL update.
 - Public replies, private internal notes, and append-only ticket events.
@@ -42,6 +42,7 @@ The server creates the initial database schema and inserts an agent if the email
 | `npm test` | Execute SLA and security unit tests |
 | `npm run build` | Build the frontend into `dist/` |
 | `npm run check` | Run tests and build |
+| `npm run smoke:deploy` | Run read-only smoke checks against the deployed site (uses `DEPLOY_URL` when set) |
 | `npm start` | Run Express in production |
 
 ## API routes
@@ -62,15 +63,39 @@ Set `HOLIDAYS` to a comma-separated list of `YYYY-MM-DD` IST dates, if required.
 
 ## Render deployment
 
-`render.yaml` specifies one Node web service and one PostgreSQL database. Connect **Adwaith-ks/ResolveHub** to Render as a Blueprint, review the plan and billing, then set `SEED_AGENT_EMAIL` and `SEED_AGENT_PASSWORD` as private environment variables. Render generates `SESSION_SECRET`. Never use Frontdesk's production database, secrets, or login credentials.
+**Live application:** [https://resolvehub-app.onrender.com](https://resolvehub-app.onrender.com)
 
-## Validation status and limitations
+The existing `render.yaml` Blueprint describes two services in the **Adwaith-ks/ResolveHub** project:
 
-GitHub Actions includes a disposable PostgreSQL 16 service for `TEST_DATABASE_URL`. CI runs `npm run check` with unit tests, database-backed API smoke coverage, and the Vite production build.
+- `resolvehub-app` — Node.js web service that runs the Express API and serves the production Vite bundle.
+- `resolvehub-db` — isolated PostgreSQL database linked through Render's `DATABASE_URL` reference.
 
-The original six SLA and security unit tests passed in a local Node.js run. Additional request-throttling unit tests and a PostgreSQL-backed API lifecycle smoke test are now included in GitHub Actions, but their execution has **not yet been verified**. Local npm installation was blocked by network/DNS access, so the full production build and live Render deployment remain unverified.
+The Blueprint generates `SESSION_SECRET`. In the Render web service's environment settings, configure `SEED_AGENT_EMAIL` and `SEED_AGENT_PASSWORD` privately. The initial password must have at least 12 characters. **Seeding is insert-only:** changing `SEED_AGENT_PASSWORD` later does not reset the password of an existing agent.
 
-Before public production use, add login and public-ticket rate limiting, customer-token delivery, a versioned migration system, credential rotation, database-backed test coverage, and a scheduled job for expired customer waits. Confirm the final deployment's PostgreSQL TLS configuration.
+To deploy a new code version, push to `main` and check the Render service's deployment dashboard. If Blueprint auto-sync is disabled, apply the Blueprint sync manually when infrastructure changes. Review any pricing and database retention limits in your Render account.
+
+### Verify a deployment
+
+The production-safe smoke test does not need credentials and performs only HTTP GET requests:
+
+```bash
+npm run smoke:deploy
+# Alternative environment:
+DEPLOY_URL=https://resolvehub-app.onrender.com npm run smoke:deploy
+```
+
+Checks:
+1. `GET /api/health` responds with HTTP 200 and `{"status":"ok"}`.
+2. `GET /api/auth/me` without credentials responds with HTTP 401.
+3. `GET /` serves the HTML app entry point.
+
+You can also run **Actions → Deployment smoke check → Run workflow** in GitHub. These checks verify reachability and basic authentication protection, **not** a database-backed end-to-end ticket workflow.
+
+### Validation and production considerations
+
+GitHub Actions `CI` provisions a disposable PostgreSQL 16 service and runs `npm run check`, covering Node tests, database-backed API smoke tests, and the Vite build. The live deployment was independently shown to serve the health endpoint, reject anonymous agent access, and display the login page.
+
+The health endpoint does not currently query PostgreSQL. For any production launch that stores important customer data, confirm successful authenticated login and a full ticket workflow against the live deployment, configure backups and retention, review database-plan expiration/limits, and implement versioned database migrations. The current in-memory rate limiter is per process; multi-instance deployments require shared rate limiting. Customer access tokens must be delivered over a secure, private channel; they are shown only once.
 
 ## Authorship and scope
 
