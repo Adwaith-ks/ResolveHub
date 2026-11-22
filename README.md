@@ -1,115 +1,117 @@
 # ResolveHub
 
-**Support with clarity.** ResolveHub is an independent support-ticket application replacing scattered spreadsheets and chat messages with auditable support workflows.
+A full-stack support ticket platform for Arvo Systems. ResolveHub replaces shared spreadsheets with a searchable agent queue, customer portal, SLA deadlines, and traceable ticket history.
+
+**Live site:** https://resolvehub-app.onrender.com
 
 ## Features
-- Restrained slate-and-teal React support workspace with searchable queues, operational metrics, priority filters, pagination, and a two-column ticket workspace.
-- Agent authentication with bcrypt-hashed passwords and opaque HttpOnly session cookies.
-- Race-safe claiming of unassigned tickets through a conditional PostgreSQL update.
-- Public replies, private internal notes, and append-only ticket events.
-- Priority-based response and resolution targets in business hours, Monday–Friday 09:30–18:30 IST (configurable holidays).
-- Customer-scoped ticket access using individual bearer tokens, with replies and reopen actions.
-- Status transitions: open → in progress → waiting/resolved; customer reply resumes a waiting ticket and recently resolved tickets can be reopened.
 
-## Stack and architecture
+- **Staff:** agent and administrator login; ticket queue, claim, priority, status, public replies, private notes, SLA dashboard, and activity history. Administrators can view the team directory and ticket workload.
+- **Customers:** registration, login, own-ticket dashboard, create tickets, choose category and priority, attach a PDF/PNG/JPEG, read public conversations, reply, and request reopening when eligible.
+- **Security:** bcrypt password hashes; signed HS256 JWTs in Secure/HttpOnly/SameSite cookies with database-backed revocation; backend role and ticket-owner checks; private notes excluded from all customer endpoints; parameterized SQL.
+- **Incidents:** conditional atomic ticket claiming (409 on a competing claim), strict customer-facing note filtering, and append-only audit events protected by a PostgreSQL trigger.
+- **SLA:** India business hours Monday–Friday 09:30–18:30 IST, configured holidays, pause on waiting for customer, resume on reply, and automatic closure after five working days of waiting.
 
-| Layer | Implementation |
-| --- | --- |
-| Frontend | React 19, Vite, CSS |
-| Backend | Node.js 20+, Express, Zod |
-| Database | PostgreSQL with parameterized queries and explicit transactions |
-| Authentication | bcrypt passwords, SHA-256-hashed random tokens |
-| Test suite | Native Node.js test runner |
-| Deployment | Render web service and PostgreSQL, GitHub Actions CI |
+## Stack
 
-The React application talks to the Express API under `/api`. In development, Vite forwards these requests to Express; in production, Express serves the compiled frontend. PostgreSQL owns ticket state, messages, sessions, and audit events.
+React 19 + Vite; Node.js 20+ + Express + Zod; PostgreSQL + `pg`; bcryptjs; GitHub Actions; Render Blueprint. The project uses **SQL directly**, not Prisma.
 
-## Local setup
+## Project layout
 
-1. Install Node.js 20+ and PostgreSQL 14+.
-2. Clone the repository, then run `npm install`.
-3. Create a PostgreSQL database named `resolvehub`.
-4. Copy `.env.example` to `.env`. Set `DATABASE_URL`, a fresh random `SESSION_SECRET` (at least 32 characters), `SEED_AGENT_EMAIL`, and a `SEED_AGENT_PASSWORD` of 12+ characters.
-5. Run `npm run dev`. Open [http://localhost:5173](http://localhost:5173) and sign in with your configured agent.
+- `client/src/main.jsx` — staff dashboard, authentication and agent ticket UI
+- `client/src/CustomerPortal.jsx` — customer ticket screens
+- `client/src/styles.css`, `client/src/customer.css` — responsive design
+- `server/index.js` — API routes and authorization
+- `server/schema.sql` — schema with additive, idempotent SQL updates
+- `server/db.js` — database connection, initialization and optional initial staff account
+- `server/customer-jwt.js` — customer and staff signed token helpers
+- `server/attachments.js` — attachment content validation and safe download
+- `server/closure.js` — automatic closure of expired customer waits
+- `server/demo.js` — optional demo accounts and fictional tickets
+- `server/*.test.js` — security, SLA, demo and API integration tests
+- `render.yaml` — Node web service and PostgreSQL database
 
-The server creates the initial database schema and inserts an agent if the email does not exist. Updating the seed password later does not reset an existing agent.
+## Local development
+
+1. Install Node.js 20+ and PostgreSQL 14+; create database `resolvehub`.
+2. Clone the repository and install dependencies:
+   ```bash
+   git clone https://github.com/Adwaith-ks/ResolveHub.git
+   cd ResolveHub
+   npm install
+   ```
+3. Copy `.env.example` to `.env`. Set `DATABASE_URL`, a random 32+-character `SESSION_SECRET`, `SEED_AGENT_EMAIL`, and `SEED_AGENT_PASSWORD` (minimum 12 characters).
+4. Run `npm run dev`; open http://localhost:5173.
+
+The backend loads `server/schema.sql` at startup. There is no separate versioned migration command yet. `SEED_AGENT_EMAIL` creates a staff user only when the email does not already exist; changing `SEED_AGENT_PASSWORD` later does not reset an existing account.
 
 ### Commands
 
-| Command | Description |
+| Command | Purpose |
 | --- | --- |
-| `npm run dev` | Start Vite and Express |
-| `npm test` | Execute SLA and security unit tests |
-| `npm run build` | Build the frontend into `dist/` |
-| `npm run check` | Run tests and build |
-| `npm run smoke:deploy` | Run read-only smoke checks against the deployed site (uses `DEPLOY_URL` when set) |
-| `npm start` | Run Express in production |
+| `npm run dev` | Run Express and Vite in development |
+| `npm run dev:server` | Run only Express |
+| `npm run dev:client` | Run only Vite |
+| `npm start` | Start the production Express server |
+| `npm run build` | Build React into `dist/` |
+| `npm test` | Run Node tests; database tests require `TEST_DATABASE_URL` |
+| `npm run check` | Run tests and production build |
+| `npm run smoke:deploy` | Read-only verification of public deployment |
 
-## API routes
+## Roles and demo accounts
 
-**Agent session required:** `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/tickets`, `GET /api/tickets/:id`, `POST /api/tickets`, `POST /api/tickets/:id/claim`, `PATCH /api/tickets/:id`, and `POST /api/tickets/:id/messages`.
+All real passwords are stored as bcrypt hashes in PostgreSQL; never place passwords in frontend source, Git commits, or a public README.
 
-**Customer API:** `POST /api/public/tickets` returns a ticket ID and a one-time access token. For `GET /api/public/tickets/:id`, `POST /api/public/tickets/:id/reply`, and `POST /api/public/tickets/:id/reopen`, set `Authorization: Bearer <customer_token>`. Customer responses exclude private messages and events.
+With `DEMO_MODE=true`:
+- `admin@arvo.com` is seeded **only if** `DEMO_ADMIN_PASSWORD` is set to at least 12 characters.
+- `agent1@arvo.com` through `agent9@arvo.com` are seeded when `DEMO_AGENT_PASSWORD` is set to at least 12 characters.
+- For compatibility with the previous demonstration, `agent1@arvo.example` through `agent9@arvo.example` and 36 fictional `[DEMO]` tickets remain supported.
+- Staff insertion is idempotent; demo tickets are created once per database. Seed values do **not** overwrite existing passwords.
 
-### SLA budgets
+For **isolated local demonstrations only**, you may set `DEMO_ADMIN_PASSWORD=AdminPassword123!` and `DEMO_AGENT_PASSWORD=AgentPassword123!`. These are publicly documented sample passwords: **never use them on the internet-facing Render service**. Choose unique private values on Render and rotate them when the demo ends. Demo staff can access ticket data; use a disposable database for public evaluations.
 
-| Priority | First response | Resolution |
-| --- | --- | --- |
-| High | 2 working hours | 1 working day |
-| Medium | 4.5 working hours | 3 working days |
-| Low | 1 working day | 5 working days |
+Registered customers create their own passwords through the registration form and have a `customer` role. Staff accounts have `agent` or `admin` roles.
 
-Set `HOLIDAYS` to a comma-separated list of `YYYY-MM-DD` IST dates, if required.
+## API
 
-## Demonstration accounts and sample tickets
+- Auth: `POST /api/auth/register` (customer), `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`.
+- Customer portal (authenticated): `GET /api/customer/tickets`, `POST /api/customer/tickets`, `GET /api/customer/tickets/:id`, `POST /api/customer/tickets/:id/reply`, `POST /api/customer/tickets/:id/reopen`, `GET /api/customer/tickets/:id/attachments/:attachmentId`.
+- Staff (authenticated): `GET /api/tickets`, `GET /api/tickets/:id`, `POST /api/tickets`, `POST /api/tickets/:id/claim`, `PATCH /api/tickets/:id`, `POST /api/tickets/:id/messages`, `GET /api/tickets/:id/attachments/:attachmentId`.
+- Administrator only: `GET /api/admin/agents`.
+- Backward-compatible public token API: `/api/public/tickets` endpoints are retained for existing integrations. A bearer ticket token is required to read/reply/reopen those tickets.
 
-This project supports **explicitly enabled demo data** for an Arvo Systems evaluator session. The fixture contains nine fictional agents and 36 fictional customer requests, including unassigned, assigned, waiting, resolved, closed, and overdue tickets. Every demo ticket starts with `[DEMO]`. Assigned tickets include sample public replies and some include private internal notes; the existing customer API still filters private messages.
+Customer ownership is verified by `customer_id` in database queries. Internal notes are never included in customer ticket responses. Attachments are optional and stored in PostgreSQL with a maximum **2 MiB**, restricted to valid PDF/PNG/JPEG signatures. Download endpoints verify staff or matching customer identity.
 
-| Setting | Purpose |
-| --- | --- |
-| `DEMO_MODE=true` | Enable the opt-in demo dataset on server startup |
-| `DEMO_AGENT_PASSWORD` | Private shared password, **at least 12 characters**, for the nine demo users |
+## Business rules and assumptions
 
-The nine demo sign-in emails are `agent1@arvo.example` through `agent9@arvo.example`. Their password is the **private** `DEMO_AGENT_PASSWORD` set in Render (not a hardcoded public password). On the first startup after both settings are provided, demo tickets and agents are created in one transaction. A marker prevents duplicate sample tickets on later deploys. Existing tickets are not deleted.
+| Priority in database | UI label | First response | Resolution |
+| --- | --- | --- | --- |
+| `high` | Critical | 120 working minutes | 540 working minutes |
+| `medium` | Medium | 270 working minutes | 1620 working minutes |
+| `low` | Low | 540 working minutes | 2700 working minutes |
 
-**To activate demo login on Render:** open the ResolveHub Blueprint and sync the updated `render.yaml`, configure `DEMO_AGENT_PASSWORD` privately on the web service, and redeploy if prompted. No demo login is available until these steps are complete. Do not enable this fixture in a service handling real customer data, since the demo accounts have full agent access. Use a separate disposable database or deployment for public demonstrations. Disable `DEMO_MODE` after the evaluation and rotate/revoke demo accounts before processing real customer information; disabling it alone does not delete previously seeded accounts.
+All amounts are **working minutes** (one working day = 540 minutes). This explicitly interprets "same working day" as a 540-minute working-time budget, not necessarily before the end of the calendar date; an issue received near closing may have a deadline the following day. This and priority changes were ambiguous in the meeting. A priority change currently recalculates the active SLA from the change time; for a waiting ticket, it resets the remaining resolution budget to the new priority. Configure excluded dates using comma-separated `HOLIDAYS=YYYY-MM-DD,YYYY-MM-DD`.
+
+Waiting on a customer pauses the resolution SLA. When the customer responds, the remaining time resumes. The background check closes tickets that have waited at least 2,700 working minutes, checking at startup and every 15 minutes; automatic closure may occur up to 15 minutes after the threshold. A resolved ticket may be reopened within five working days. Audit history is appended to `ticket_events`; an SQL trigger rejects updates and deletes, but privileged database administrators can still change database structures.
 
 ## Render deployment
 
-**Live application:** [https://resolvehub-app.onrender.com](https://resolvehub-app.onrender.com)
+The root `render.yaml` Blueprint deploys `resolvehub-app` (Express serving the React production build) and `resolvehub-db` (PostgreSQL). Render injects `DATABASE_URL` from the database and generates `SESSION_SECRET`. On the web service, configure all password variables privately:
 
-The existing `render.yaml` Blueprint describes two services in the **Adwaith-ks/ResolveHub** project:
+- `SEED_AGENT_EMAIL` / `SEED_AGENT_PASSWORD` for the initial staff account.
+- `DEMO_MODE=true`, `DEMO_AGENT_PASSWORD`, and `DEMO_ADMIN_PASSWORD` only for an isolated demonstration.
 
-- `resolvehub-app` — Node.js web service that runs the Express API and serves the production Vite bundle.
-- `resolvehub-db` — isolated PostgreSQL database linked through Render's `DATABASE_URL` reference.
+Sync the Blueprint to apply environment configuration changes, then inspect the web-service deployment and logs. New commits to `main` trigger deployments when auto-deploy is enabled. Render free-plan instances can sleep; verify current plan restrictions and database retention before committing important customer data.
 
-The Blueprint generates `SESSION_SECRET`. In the Render web service's environment settings, configure `SEED_AGENT_EMAIL` and `SEED_AGENT_PASSWORD` privately. The initial password must have at least 12 characters. **Seeding is insert-only:** changing `SEED_AGENT_PASSWORD` later does not reset the password of an existing agent.
+To check availability, run `npm run smoke:deploy`; or use **GitHub Actions → Deployment smoke check**. This verifies homepage, health API and unauthenticated access denial, not full production database workflows.
 
-To deploy a new code version, push to `main` and check the Render service's deployment dashboard. If Blueprint auto-sync is disabled, apply the Blueprint sync manually when infrastructure changes. Review any pricing and database retention limits in your Render account.
+## Known limitations / future work
 
-### Verify a deployment
-
-The production-safe smoke test does not need credentials and performs only HTTP GET requests:
-
-```bash
-npm run smoke:deploy
-# Alternative environment:
-DEPLOY_URL=https://resolvehub-app.onrender.com npm run smoke:deploy
-```
-
-Checks:
-1. `GET /api/health` responds with HTTP 200 and `{"status":"ok"}`.
-2. `GET /api/auth/me` without credentials responds with HTTP 401.
-3. `GET /` serves the HTML app entry point.
-
-You can also run **Actions → Deployment smoke check → Run workflow** in GitHub. These checks verify reachability and basic authentication protection, **not** a database-backed end-to-end ticket workflow.
-
-### Validation and production considerations
-
-GitHub Actions `CI` provisions a disposable PostgreSQL 16 service and runs `npm run check`, covering Node tests, database-backed API smoke tests, and the Vite build. The live deployment was independently shown to serve the health endpoint, reject anonymous agent access, and display the login page.
-
-The health endpoint does not currently query PostgreSQL. For any production launch that stores important customer data, confirm successful authenticated login and a full ticket workflow against the live deployment, configure backups and retention, review database-plan expiration/limits, and implement versioned database migrations. The current in-memory rate limiter is per process; multi-instance deployments require shared rate limiting. Customer access tokens must be delivered over a secure, private channel; they are shown only once.
-
-## Authorship and scope
-
-Project created for **Adwaith KS**, using the support-desk problem statement as the reference. This repository has its own source implementation, interface, and database; it is not a fork.
+- No dedicated customer email notifications or automated customer-token delivery.
+- No password-reset/email-verification flow, CSRF token protection, or persistent distributed request rate limiting.
+- Attachments are stored in PostgreSQL, not object storage; upload limits are deliberately small, and antivirus/content scanning is not implemented.
+- Admins can monitor staff, but staff creation/editing is currently via seed/configuration rather than an admin settings UI.
+- The schema uses additive startup SQL, not versioned production migration tooling.
+- Automatic closure runs inside the web process. For robust scheduling across outages, use a separate scheduled worker.
+- The health endpoint reports API liveness, not database readiness. Use authenticated end-to-end tests and backups before real customer use.
+- Some original ambiguous SLA rules are documented above and should be approved by Arvo before production use.
