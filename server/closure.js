@@ -12,8 +12,8 @@ export async function closeExpiredWaitingTickets(now=new Date()){
     if(businessMinutesBetween(ticket.waiting_since,now) < fiveBusinessDays)continue;
     const closed=await transaction(async db=>{
       const {rows:updated}=await db.query(
-        "UPDATE tickets SET status='closed',closed_at=$2,updated_at=$2,waiting_since=null,remaining_resolution_ms=null WHERE id=$1 AND status='waiting' AND waiting_since IS NOT NULL AND waiting_since<=$2 RETURNING id",
-        [ticket.id,now]
+        "UPDATE tickets SET status='closed',closed_at=$2,updated_at=$2,waiting_since=null,remaining_resolution_ms=null WHERE id=$1 AND status='waiting' AND waiting_since IS NOT NULL AND waiting_since=$3 RETURNING id",
+        [ticket.id,now,ticket.waiting_since]
       );
       if(!updated.length)return false;
       await db.query('INSERT INTO ticket_events(ticket_id,actor_type,actor_id,event_type,metadata) VALUES($1,$2,$3,$4,$5)',[ticket.id,'system',null,'auto_closed',JSON.stringify({reason:'five_working_days_without_customer_reply'})]);
