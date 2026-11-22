@@ -57,6 +57,28 @@ const NAMES = [
   'Leena Roy', 'Manu George'
 ];
 
+
+export async function seedDemoStaff() {
+  if (process.env.DEMO_MODE !== 'true') return;
+  const agentPassword=process.env.DEMO_AGENT_PASSWORD;
+  const adminPassword=process.env.DEMO_ADMIN_PASSWORD;
+  if (agentPassword && agentPassword.length >= 12) {
+    const hash=await bcrypt.hash(agentPassword,12);
+    await transaction(async db=>{
+      for(const staff of DEMO_AGENTS){
+        const email=staff.email.replace('@arvo.example','@arvo.com');
+        await db.query("INSERT INTO agents(name,email,password_hash,role) VALUES($1,$2,$3,'agent') ON CONFLICT(email) DO NOTHING",[staff.name,email,hash]);
+      }
+    });
+  }
+  if (adminPassword && adminPassword.length >= 12) {
+    const hash=await bcrypt.hash(adminPassword,12);
+    await transaction(async db=>{
+      await db.query("INSERT INTO agents(name,email,password_hash,role) VALUES('Arvo Administrator',$1,$2,'admin') ON CONFLICT(email) DO UPDATE SET role='admin'",['admin@arvo.com',hash]);
+    });
+  }
+}
+
 export async function seedDemoData() {
   if (process.env.DEMO_MODE !== 'true') return;
   const password = process.env.DEMO_AGENT_PASSWORD;
