@@ -43,6 +43,17 @@ test('demo accounts and tickets seed once with private notes', {skip: !process.e
     const notes = await query("SELECT count(*)::integer AS count FROM messages m JOIN tickets t ON t.id=m.ticket_id WHERE t.subject LIKE '[DEMO] %' AND m.is_internal=true");
     assert.ok(notes.rows[0].count > 0);
     await assert.rejects(query("UPDATE ticket_events SET event_type='changed' WHERE id=(SELECT id FROM ticket_events LIMIT 1)"),/immutable/);
+    const {closeExpiredWaitingTickets}=await import('./closure.js');
+    const oldWait=new Date(Date.now()-20*86400000);
+    const pending=await query("INSERT INTO tickets(subject,description,customer_name,customer_email,customer_token_hash,priority,status,waiting_since) VALUES($1,$2,$3,$4,$5,'medium','waiting',$6) RETURNING id",['Automatic close test','Awaiting customer input','Test Customer','closure@example.test','closure-'+Date.now(),oldWait]);
+    const pendingId=pending.rows[0].id;
+    await closeExpiredWaitingTickets();
+    const completed=await query('SELECT status,closed_at FROM tickets WHERE id=$1',[pendingId]);
+    assert.equal(completed.rows[0].status,'closed');
+    assert.ok(completed.rows[0].closed_at);
+    const history=await query("SELECT event_type FROM ticket_events WHERE ticket_id=$1 AND event_type='auto_closed'",[pendingId]);
+    assert.equal(history.rowCount,1);
+
   } finally {
     delete process.env.DEMO_MODE;
     delete process.env.DEMO_AGENT_PASSWORD;
