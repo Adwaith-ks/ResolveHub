@@ -7,7 +7,7 @@ import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
 import {query,transaction,initialize} from './db.js';
-import {seedDemoData} from './demo.js';
+import {seedDemoData,seedDemoStaff} from './demo.js';
 import {issueCustomerJwt, verifyCustomerJwt} from './customer-jwt.js';
 import {newToken,digest,requireSecret} from './security.js';
 import {createRateLimiter} from './rate-limit.js';
@@ -103,4 +103,4 @@ app.post('/api/public/tickets/:id/reopen',publicActionLimit,asyncRoute(async(req
 app.use('/api',(_req,res)=>res.status(404).json({error:'Not found'}));
 const __dirname=dirname(fileURLToPath(import.meta.url));app.use(express.static(join(__dirname,'../dist')));app.get('*',(_req,res)=>res.sendFile(join(__dirname,'../dist/index.html')));
 app.use((err,_req,res,_next)=>{if(!err.status)console.error(err);res.status(err.status||500).json({error:err.status?err.message:'Internal server error'});});
-requireSecret();await initialize();await seedDemoData();app.listen(process.env.PORT||3001,()=>console.log('ResolveHub API started'));
+requireSecret();await initialize();await seedDemoStaff();await seedDemoData();app.listen(process.env.PORT||3001,()=>console.log('ResolveHub API started'));
