@@ -62,3 +62,15 @@ DROP TRIGGER IF EXISTS ticket_events_immutable ON ticket_events;
 CREATE TRIGGER ticket_events_immutable
 BEFORE UPDATE OR DELETE ON ticket_events
 FOR EACH ROW EXECUTE FUNCTION deny_ticket_event_mutation();
+
+CREATE TABLE IF NOT EXISTS ticket_attachments (
+ id BIGSERIAL PRIMARY KEY,
+ ticket_id BIGINT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+ uploaded_by BIGINT REFERENCES customers(id),
+ filename VARCHAR(120) NOT NULL,
+ mime_type VARCHAR(80) NOT NULL,
+ content BYTEA NOT NULL,
+ size_bytes INTEGER NOT NULL CHECK(size_bytes>0 AND size_bytes<=2097152),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS attachments_ticket_idx ON ticket_attachments(ticket_id);
