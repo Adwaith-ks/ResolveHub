@@ -210,6 +210,8 @@ function Dashboard({ agent, onLogout }) {
   const [notice, setNotice] = useState(null);
   const [mobileNav, setMobileNav] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [team, setTeam] = useState([]);
+  useEffect(() => { if(agent.role === 'admin') api('/admin/agents').then(result => setTeam(result.agents)).catch(()=>{}); }, [agent.role]);
   async function refresh(silent = false) {
     if (!silent) setLoading(true);
     setLoadError('');
@@ -249,13 +251,14 @@ function Dashboard({ agent, onLogout }) {
     <aside className={'sidebar ' + (mobileNav ? 'mobile-open' : '')}>
       <Brand/><p className="side-heading">WORKSPACE</p>
       <nav aria-label="Ticket queues">{FILTERS.map(([key, title, icon]) => <button type="button" title={title} key={key} className={'nav-item ' + (filter === key ? 'nav-current' : '')} onClick={() => { setFilter(key); setMobileNav(false); }}><Icon name={icon} size={17}/><span className="nav-text">{title}</span><small>{count(key)}</small></button>)}</nav>
-      <div className="sidebar-bottom"><div className="sidebar-profile"><span className="avatar">{agent.name?.slice(0, 1).toUpperCase()}</span><div><strong>{agent.name}</strong><small>Support agent</small></div><button className="icon-button" title="Sign out" aria-label="Sign out" onClick={logout}><Icon name="logout" size={18}/></button></div></div>
+      <div className="sidebar-bottom"><div className="sidebar-profile"><span className="avatar">{agent.name?.slice(0, 1).toUpperCase()}</span><div><strong>{agent.name}</strong><small>{agent.role === 'admin' ? 'Administrator' : 'Support agent'}</small></div><button className="icon-button" title="Sign out" aria-label="Sign out" onClick={logout}><Icon name="logout" size={18}/></button></div></div>
     </aside>
     <div className="main-area">
       <header className="topbar"><div className="breadcrumb"><button className="icon-button mobile-menu" aria-label="Toggle navigation" onClick={() => setMobileNav(value => !value)}><Icon name="menu"/></button><span>Workspace</span><Icon name="chevron" size={14}/><strong>{heading}</strong></div><div className="topbar-user"><span className="topbar-account">{agent.email}</span><button type="button" className="topbar-signout" onClick={logout} aria-label="Sign out of ResolveHub" title="Sign out"><Icon name="logout" size={16}/><span>Sign out</span></button></div></header>
       <main className="content">
-        <div className="page-title"><div><h1>Support overview</h1><p>Manage requests, prioritize work, and track service commitments.</p></div><Button onClick={() => setOpenForm(true)}><Icon name="plus" size={17}/>New ticket</Button></div>
+        <div className="page-title"><div><h1>{agent.role === 'admin' ? 'Admin overview' : 'Support overview'}</h1><p>Manage requests, prioritize work, and track service commitments.</p></div><Button onClick={() => setOpenForm(true)}><Icon name="plus" size={17}/>New ticket</Button></div>
         <div className="metrics">{metrics.map(([name, value, caption]) => <div className="metric" key={name}><span>{name}</span><strong>{value}</strong><small>{caption}</small></div>)}</div>
+        {agent.role === 'admin' && <section className="admin-team"><div className="admin-team-heading"><h2>Support team</h2><span>{team.length} staff accounts</span></div><div className="admin-team-list">{team.map(person => <div key={person.id} className="admin-team-member"><span className="admin-team-avatar">{person.name?.charAt(0)}</span><div><strong>{person.name}</strong><small>{person.email}</small></div><span>{person.role}</span><strong>{person.ticket_count} tickets</strong></div>)}</div></section>}
         <section className="board"><div className="board-heading"><div><h2>{heading} <span>{filtered.length}</span></h2><p>Tickets in the selected queue</p></div><Button variant="secondary" disabled={loading} onClick={() => refresh()}><Icon name="refresh" size={16}/>Refresh</Button></div>
           <div className="board-toolbar"><div className="quick-filters">{[['all', 'All'], ['mine', 'Mine'], ['open', 'Unassigned'], ['waiting', 'Waiting'], ['resolved', 'Resolved']].map(([key, label]) => <button className={filter === key ? 'quick-current' : ''} key={key} onClick={() => setFilter(key)}>{label}</button>)}</div><div className="toolbar-actions"><label className="priority-filter">Priority<select aria-label="Filter priority" value={priority} onChange={e => setPriority(e.target.value)}><option value="all">All</option>{PRIORITIES.map(item => <option key={item} value={item}>{item[0].toUpperCase() + item.slice(1)}</option>)}</select></label><label className="search-field"><Icon name="search" size={17}/><input aria-label="Search tickets" placeholder="Search tickets" value={search} onChange={e => setSearch(e.target.value)}/></label></div></div>
           {loadError && <div className="inline-error board-error" role="alert">{loadError} <Button variant="secondary" onClick={() => refresh()}>Retry</Button></div>}
