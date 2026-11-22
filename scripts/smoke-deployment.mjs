@@ -36,6 +36,9 @@ try {
   await check('backend health', '/api/health', 200, body => {
     try { return JSON.parse(body).status === 'ok'; } catch { return false; }
   });
+  await check('database readiness', '/api/ready', 200, body => {
+    try { return JSON.parse(body).status === 'ready'; } catch { return false; }
+  });
   await check('unauthenticated agent access denied', '/api/auth/me', 401, body => {
     try { return JSON.parse(body).error === 'Sign in required'; } catch { return false; }
   });
