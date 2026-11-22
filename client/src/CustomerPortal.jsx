@@ -15,6 +15,7 @@ export default function CustomerPortal({user,onLogout}) {
   const [selected,setSelected]=useState(null);
   const [create,setCreate]=useState(false);
   const [form,setForm]=useState(EMPTY);
+  const [attachment,setAttachment]=useState(null);
   const [reply,setReply]=useState('');
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
@@ -24,7 +25,7 @@ export default function CustomerPortal({user,onLogout}) {
   useEffect(()=>{void load();},[]);
   async function open(id){try{setSelected(await request('/tickets/'+id));setError('');}catch(e){setError(e.message);}}
   async function action(fn,done){setBusy(true);setError('');try{await fn();await load();if(selected)await open(selected.ticket.id);setNotice(done);}catch(e){setError(e.message);}finally{setBusy(false);}}
-  async function createTicket(e){e.preventDefault();setBusy(true);setError('');try{const result=await request('/tickets',{method:'POST',body:JSON.stringify(form)});setCreate(false);setForm(EMPTY);setNotice('Ticket #'+result.id+' created successfully');await load();await open(result.id);}catch(e){setError(e.message);}finally{setBusy(false);}}
+  async function createTicket(e){e.preventDefault();setBusy(true);setError('');try{let attachmentData=null;if(attachment){if(attachment.size>2097152)throw new Error('Attachments must be 2 MB or smaller');if(!['image/jpeg','image/png','application/pdf'].includes(attachment.type))throw new Error('Only PDF, PNG or JPEG files are accepted');const encoded=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(new Error('Could not read attachment'));reader.readAsDataURL(attachment);});attachmentData={name:attachment.name,type:attachment.type,data:encoded};}const result=await request('/tickets',{method:'POST',body:JSON.stringify({...form,attachment:attachmentData})});setCreate(false);setForm(EMPTY);setAttachment(null);setNotice('Ticket #'+result.id+' created successfully');await load();await open(result.id);}catch(e){setError(e.message);}finally{setBusy(false);}}
   async function sendReply(e){e.preventDefault();if(!reply.trim()||!selected)return;await action(async()=>{await request('/tickets/'+selected.ticket.id+'/reply',{method:'POST',body:JSON.stringify({body:reply})});setReply('');},'Reply sent');}
   async function reopen(){if(!selected)return;await action(()=>request('/tickets/'+selected.ticket.id+'/reopen',{method:'POST'}),'Ticket reopened');}
   const update=(field,value)=>setForm(f=>({...f,[field]:value}));
@@ -36,6 +37,7 @@ export default function CustomerPortal({user,onLogout}) {
       {notice&&<p role="status" className="customer-notice">{notice}</p>}
       {selected ? <div className="customer-detail">
         <section className="customer-card"><div className="customer-detail-top"><span className="customer-tag">{STATUS[selected.ticket.status]||selected.ticket.status}</span><span className="customer-tag">{selected.ticket.priority} priority</span></div><h2>{selected.ticket.subject}</h2><p className="customer-description">{selected.ticket.description}</p><dl className="customer-properties"><div><dt>Created</dt><dd>{fmt(selected.ticket.created_at)}</dd></div><div><dt>Resolution due</dt><dd>{fmt(selected.ticket.resolution_due)}</dd></div><div><dt>Resolved</dt><dd>{fmt(selected.ticket.resolved_at)}</dd></div><div><dt>Closed</dt><dd>{fmt(selected.ticket.closed_at)}</dd></div></dl>
+        {!!selected.attachments?.length&&<div className="customer-attachments"><h3>Attachments</h3>{selected.attachments.map(file=><a key={file.id} href={'/api/customer/tickets/'+selected.ticket.id+'/attachments/'+file.id} download>{file.filename} ({Math.ceil(file.size_bytes/1024)} KB)</a>)}</div>}
         <h3>Conversation</h3>
         <div className="customer-messages">{selected.messages.length?selected.messages.map(m=><div key={m.id} className={'customer-message '+(m.actor_type==='agent'?'customer-agent-reply':'')}><div><strong>{m.actor_type==='agent'?'Support team':'You'}</strong><time>{fmt(m.created_at)}</time></div><p>{m.body}</p></div>):<p className="customer-muted">No replies yet. The support team will respond here.</p>}</div>
         {!['resolved','closed'].includes(selected.ticket.status)&&<form onSubmit={sendReply} className="customer-reply"><label htmlFor="customer-reply-input">Reply to the support team</label><textarea id="customer-reply-input" required maxLength={10000} value={reply} onChange={e=>setReply(e.target.value)} rows={4} placeholder="Describe what happened or answer the agent's question"/><button type="submit" className="customer-primary" disabled={busy||!reply.trim()}>Send reply</button></form>}
@@ -49,7 +51,7 @@ export default function CustomerPortal({user,onLogout}) {
         <label>Category<select value={form.category} onChange={e=>update('category',e.target.value)}><option value="general">General</option><option value="technical">Technical issue</option><option value="billing">Billing</option><option value="account">Account access</option><option value="feature">Feature request</option></select></label>
         <label>Priority<select value={form.priority} onChange={e=>update('priority',e.target.value)}><option value="high">Critical</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
         <label>Description<textarea required minLength={1} maxLength={10000} rows={5} value={form.description} onChange={e=>update('description',e.target.value)} placeholder="Include steps to reproduce the problem and its impact"/></label>
-        <p className="customer-muted">Attachments are not enabled on this deployment. Please describe the issue without including sensitive information.</p>
+        <label>Attachment (optional)<input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={e=>setAttachment(e.target.files?.[0]||null)}/></label><p className="customer-muted">PDF, PNG or JPEG only. Maximum 2 MB. Do not upload secrets or sensitive account credentials.</p>
         <button className="customer-primary" type="submit" disabled={busy}>{busy?'Submitting…':'Submit ticket'}</button>
       </form></section></div>}
     </main>
