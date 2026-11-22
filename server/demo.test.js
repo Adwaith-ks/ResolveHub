@@ -42,6 +42,7 @@ test('demo accounts and tickets seed once with private notes', {skip: !process.e
     assert.deepEqual(new Set(statuses.rows.map(x => x.status)), new Set(['open','in_progress','waiting','resolved','closed']));
     const notes = await query("SELECT count(*)::integer AS count FROM messages m JOIN tickets t ON t.id=m.ticket_id WHERE t.subject LIKE '[DEMO] %' AND m.is_internal=true");
     assert.ok(notes.rows[0].count > 0);
+    await assert.rejects(query("UPDATE ticket_events SET event_type='changed' WHERE id=(SELECT id FROM ticket_events LIMIT 1)"),/immutable/);
   } finally {
     delete process.env.DEMO_MODE;
     delete process.env.DEMO_AGENT_PASSWORD;
