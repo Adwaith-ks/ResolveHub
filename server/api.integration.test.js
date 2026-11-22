@@ -64,7 +64,7 @@ test('database-backed agent and customer ticket lifecycle',{skip:!database,timeo
  assert.equal(customerMe.data.user.email,customerAccount.email);
  const duplicate=await request('/api/auth/register',{method:'POST',body:customerAccount});
  assert.equal(duplicate.status,409);
- const newTicket=await request('/api/customer/tickets',{method:'POST',cookie:customerCookie,body:{subject:'Cannot reach my account',description:'My dashboard produces an error after login',priority:'high',category:'technical'}});
+ const newTicket=await request('/api/customer/tickets',{method:'POST',cookie:customerCookie,body:{subject:'Cannot reach my account',description:'My dashboard produces an error after login',priority:'high',category:'technical',attachment:{name:'example.pdf',type:'application/pdf',data:Buffer.from('%PDF-1.4\nDEMO').toString('base64')}}});
  assert.equal(newTicket.status,201);
  const customerTicketId=newTicket.data.id;
  const list=await request('/api/customer/tickets',{cookie:customerCookie});
@@ -85,6 +85,13 @@ test('database-backed agent and customer ticket lifecycle',{skip:!database,timeo
  const safeDetail=await request('/api/customer/tickets/'+customerTicketId,{cookie:customerCookie});
  assert.equal(safeDetail.status,200);
  assert.equal(safeDetail.data.messages.some(x=>x.body.includes('STAFF ONLY')),false);
+ assert.equal(safeDetail.data.attachments.length,1);
+ const attachmentId=safeDetail.data.attachments[0].id;
+ const fileDownload=await fetch(base+'/api/customer/tickets/'+customerTicketId+'/attachments/'+attachmentId,{headers:{Cookie:customerCookie}});
+ assert.equal(fileDownload.status,200);
+ assert.equal(await fileDownload.text(),'%PDF-1.4\nDEMO');
+ const wrongOwnerFile=await fetch(base+'/api/customer/tickets/'+customerTicketId+'/attachments/'+attachmentId,{headers:{Cookie:otherCookie}});
+ assert.equal(wrongOwnerFile.status,404);
  const staffReply=await request('/api/tickets/'+customerTicketId+'/messages',{method:'POST',cookie,body:{body:'We are investigating',is_internal:false}});
  assert.equal(staffReply.status,201);
  const visibleDetail=await request('/api/customer/tickets/'+customerTicketId,{cookie:customerCookie});
