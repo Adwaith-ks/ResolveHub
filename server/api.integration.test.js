@@ -11,7 +11,7 @@ test('database-backed agent and customer ticket lifecycle',{skip:!database,timeo
  const port=await freePort();
  const seedEmail='ci-agent@example.test',seedPassword='ci-test-password-12345';
  const child=spawn(process.execPath,['server/index.js'],{
-  cwd:process.cwd(),env:{...process.env,DATABASE_URL:database,PORT:String(port),SESSION_SECRET:randomBytes(32).toString('hex'),SEED_AGENT_EMAIL:seedEmail,SEED_AGENT_PASSWORD:seedPassword,NODE_ENV:'test'},
+  cwd:process.cwd(),env:{...process.env,DATABASE_URL:database,PORT:String(port),SESSION_SECRET:randomBytes(32).toString('hex'),SEED_AGENT_EMAIL:seedEmail,SEED_AGENT_PASSWORD:seedPassword,DEMO_MODE:'true',DEMO_AGENT_PASSWORD:'ci-demo-agent-password-12345',DEMO_ADMIN_PASSWORD:'ci-demo-admin-password-12345',NODE_ENV:'test'},
   stdio:['ignore','pipe','pipe']
  });
  let logs='';child.stdout.on('data',d=>logs+=d.toString());child.stderr.on('data',d=>logs+=d.toString());
@@ -31,6 +31,18 @@ test('database-backed agent and customer ticket lifecycle',{skip:!database,timeo
  const login=await request('/api/auth/login',{method:'POST',body:{email:seedEmail,password:seedPassword}});
  assert.equal(login.status,200);assert.ok(login.cookie?.includes('rh_session='));
  const cookie=login.cookie.split(';')[0];
+ const agentDemo=await request('/api/auth/login',{method:'POST',body:{email:'agent1@arvo.com',password:'ci-demo-agent-password-12345'}});
+ assert.equal(agentDemo.status,200);
+ assert.equal(agentDemo.data.user.role,'agent');
+ const agentAccess=await request('/api/admin/agents',{cookie:agentDemo.cookie.split(';')[0]});
+ assert.equal(agentAccess.status,403);
+ const adminLogin=await request('/api/auth/login',{method:'POST',body:{email:'admin@arvo.com',password:'ci-demo-admin-password-12345'}});
+ assert.equal(adminLogin.status,200);
+ assert.equal(adminLogin.data.user.role,'admin');
+ const adminList=await request('/api/admin/agents',{cookie:adminLogin.cookie.split(';')[0]});
+ assert.equal(adminList.status,200);
+ assert.ok(adminList.data.agents.some(a=>a.email==='agent9@arvo.com'));
+
  const customerEmail='example-'+randomBytes(5).toString('hex')+'@example.test';
  const created=await request('/api/public/tickets',{method:'POST',body:{subject:'Printer access issue',description:'Can no longer print documents.',customer_name:'Test Customer',customer_email:customerEmail,priority:'high'}});
  assert.equal(created.status,201);assert.ok(created.data.customer_token);
