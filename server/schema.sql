@@ -50,3 +50,15 @@ CREATE TABLE IF NOT EXISTS customer_sessions (
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Ticket event entries are append-only, including for direct SQL through the app role.
+CREATE OR REPLACE FUNCTION deny_ticket_event_mutation()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'Ticket audit events are immutable';
+END;
+$$;
+DROP TRIGGER IF EXISTS ticket_events_immutable ON ticket_events;
+CREATE TRIGGER ticket_events_immutable
+BEFORE UPDATE OR DELETE ON ticket_events
+FOR EACH ROW EXECUTE FUNCTION deny_ticket_event_mutation();
