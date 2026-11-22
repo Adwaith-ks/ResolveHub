@@ -167,7 +167,7 @@ function TicketDetail({ data, agent, onClose, onChanged, notify }) {
           <section className="conversation-pane">
             <div className="ticket-summary">
               <div className="badge-row"><Badge kind="priority" value={ticket.priority}/><Badge kind="status" value={ticket.status}/>{overdue(ticket) && <span className="breach">Resolution overdue</span>}</div>
-              <h2>{ticket.subject}</h2><p className="ticket-description">{ticket.description}</p>
+              <h2>{ticket.subject}</h2><p className="ticket-description">{ticket.description}</p>{data.attachments?.length>0 && <div className="staff-attachments"><strong>Customer attachments</strong>{data.attachments.map(file => <a key={file.id} href={"/api/tickets/"+ticket.id+"/attachments/"+file.id} download>{file.filename} ({Math.ceil(file.size_bytes/1024)} KB)</a>)}</div>}
               <div className="requester"><div className="avatar">{ticket.customer_name?.slice(0, 1).toUpperCase()}</div><div><strong>{ticket.customer_name}</strong><span>{ticket.customer_email}</span></div></div>
             </div>
             <div className="detail-tabs" role="tablist"><button role="tab" aria-selected={tab === 'conversation'} className={tab === 'conversation' ? 'tab-current' : ''} onClick={() => setTab('conversation')}>Conversation <span>{data.messages.length}</span></button><button role="tab" aria-selected={tab === 'activity'} className={tab === 'activity' ? 'tab-current' : ''} onClick={() => setTab('activity')}>Activity <span>{data.events.length}</span></button></div>
