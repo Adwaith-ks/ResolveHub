@@ -84,6 +84,11 @@ app.post('/api/customer/tickets/:id/reopen',customer,publicActionLimit,asyncRout
  res.json({ok:true});
 }));
 
+app.get('/api/admin/agents',agent,asyncRoute(async(req,res)=>{
+ if(req.agent.role!=='admin')throw fail(403,'Administrator access required');
+ const {rows}=await query("SELECT a.id,a.name,a.email,a.role,COUNT(t.id)::integer AS ticket_count FROM agents a LEFT JOIN tickets t ON t.assignee_id=a.id GROUP BY a.id,a.name,a.email,a.role ORDER BY a.role DESC,a.name");
+ res.json({agents:rows});
+}));
 app.get('/api/tickets',agent,asyncRoute(async(req,res)=>{const status=req.query.status,search=String(req.query.search||'').trim().slice(0,100);if(status&&!['open','in_progress','waiting','resolved','closed','all'].includes(status))throw fail(400,'Invalid status');const {rows}=await query("SELECT t.id,t.subject,t.customer_name,t.customer_email,t.priority,t.status,t.assignee_id,a.name AS assignee_name,t.first_response_due,t.resolution_due,t.created_at,t.updated_at FROM tickets t LEFT JOIN agents a ON a.id=t.assignee_id WHERE ($1::text IS NULL OR t.status=$1) AND ($2::text='' OR t.subject ILIKE '%'||$2||'%' OR t.customer_email ILIKE '%'||$2||'%') ORDER BY CASE WHEN t.status IN ('open','in_progress') THEN 0 ELSE 1 END,t.created_at DESC LIMIT 250",[!status||status==='all'?null:status,search]);res.json({tickets:rows});}));
 app.get('/api/tickets/:id',agent,asyncRoute(async(req,res)=>res.json(await details(parse(id,req.params.id),true))));
 async function createTicket(req,res,actor){const input=parse(ticketInput,req.body);const token=newToken(),d=deadlines(input.priority);const {rows}=await transaction(async db=>{const out=await db.query('INSERT INTO tickets(subject,description,customer_name,customer_email,customer_token_hash,priority,first_response_due,resolution_due) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',[input.subject,input.description,input.customer_name,input.customer_email.toLowerCase(),digest(token),input.priority,d.first_response_due,d.resolution_due]);await event(db,out.rows[0].id,actor,req.agent?.id||null,'created');return out;});res.status(201).json({id:rows[0].id,customer_token:token});}
