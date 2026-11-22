@@ -20,10 +20,12 @@ test('demo accounts and tickets seed once with private notes', {skip: !process.e
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
   process.env.DEMO_MODE = 'true';
   process.env.DEMO_AGENT_PASSWORD = 'ci-demo-only-password-12345';
+  process.env.DEMO_ADMIN_PASSWORD = 'ci-demo-admin-password-12345';
   const {initialize, query, close} = await import('./db.js');
-  const {seedDemoData, DEMO_AGENTS} = await import('./demo.js');
+  const {seedDemoData,seedDemoStaff, DEMO_AGENTS} = await import('./demo.js');
   try {
     await initialize();
+    await seedDemoStaff();
     await seedDemoData();
     const first = await query("SELECT count(*)::integer AS count FROM tickets WHERE subject LIKE '[DEMO] %'");
     assert.equal(first.rows[0].count, 36);
@@ -32,6 +34,10 @@ test('demo accounts and tickets seed once with private notes', {skip: !process.e
     assert.equal(second.rows[0].count, 36);
     const accounts = await query('SELECT email FROM agents WHERE email LIKE $1', ['agent%@arvo.example']);
     assert.equal(accounts.rowCount, DEMO_AGENTS.length);
+    const newAgents = await query('SELECT count(*)::integer AS count FROM agents WHERE email LIKE $1', ['agent%@arvo.com']);
+    assert.equal(newAgents.rows[0].count,9);
+    const admins = await query('SELECT role FROM agents WHERE email=$1',['admin@arvo.com']);
+    assert.equal(admins.rows[0].role,'admin');
     const statuses = await query("SELECT DISTINCT status FROM tickets WHERE subject LIKE '[DEMO] %'");
     assert.deepEqual(new Set(statuses.rows.map(x => x.status)), new Set(['open','in_progress','waiting','resolved','closed']));
     const notes = await query("SELECT count(*)::integer AS count FROM messages m JOIN tickets t ON t.id=m.ticket_id WHERE t.subject LIKE '[DEMO] %' AND m.is_internal=true");
@@ -39,6 +45,7 @@ test('demo accounts and tickets seed once with private notes', {skip: !process.e
   } finally {
     delete process.env.DEMO_MODE;
     delete process.env.DEMO_AGENT_PASSWORD;
+    delete process.env.DEMO_ADMIN_PASSWORD;
     await close();
   }
 });
