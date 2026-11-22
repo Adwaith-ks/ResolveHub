@@ -51,6 +51,14 @@ test('database-backed agent and customer ticket lifecycle',{skip:!database,timeo
  const retrieved=await request('/api/public/tickets/'+ticketId,{token});assert.equal(retrieved.status,200);
  const claim=await request('/api/tickets/'+ticketId+'/claim',{method:'POST',cookie});assert.equal(claim.status,200);
  const again=await request('/api/tickets/'+ticketId+'/claim',{method:'POST',cookie});assert.equal(again.status,409);
+ const raceTicket=await request('/api/public/tickets',{method:'POST',body:{subject:'Simultaneous claim test',description:'Two agents trying to claim one issue.',customer_name:'Test Customer',customer_email:'race-'+randomBytes(4).toString('hex')+'@example.test',priority:'high'}});
+ assert.equal(raceTicket.status,201);
+ const concurrent=await Promise.all([
+  request('/api/tickets/'+raceTicket.data.id+'/claim',{method:'POST',cookie}),
+  request('/api/tickets/'+raceTicket.data.id+'/claim',{method:'POST',cookie:agentDemo.cookie.split(';')[0]})
+ ]);
+ assert.deepEqual(concurrent.map(result=>result.status).sort((x,y)=>x-y),[200,409]);
+
  const note=await request('/api/tickets/'+ticketId+'/messages',{method:'POST',cookie,body:{body:'Private troubleshooting steps',is_internal:true}});assert.equal(note.status,201);
  const reply=await request('/api/tickets/'+ticketId+'/messages',{method:'POST',cookie,body:{body:'We are looking into it.',is_internal:false}});assert.equal(reply.status,201);
  const customerView=await request('/api/public/tickets/'+ticketId,{token});
