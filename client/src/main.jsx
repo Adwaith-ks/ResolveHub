@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
+import CustomerPortal from './CustomerPortal.jsx';
 
 const STATUS = { open: 'Open', in_progress: 'In progress', waiting: 'Waiting on customer', resolved: 'Resolved', closed: 'Closed' };
 const PRIORITIES = ['low', 'medium', 'high'];
@@ -74,27 +75,36 @@ function Modal({ title, label, children, onClose, narrow = false }) {
   </div>;
 }
 function Login({ onLogin }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  async function submit(event) {
-    event.preventDefault(); setError(''); setBusy(true);
+  const [mode,setMode]=useState('login');
+  const [name,setName]=useState('');
+  const [email,setEmail]=useState('');
+  const [password,setPassword]=useState('');
+  const [visible,setVisible]=useState(false);
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState(false);
+  async function submit(event){
+    event.preventDefault();setBusy(true);setError('');
     try {
-      const response = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
-      onLogin(response.agent);
-    } catch (reason) { setError(reason.message); } finally { setBusy(false); }
+      const path=mode==='register'?'/auth/register':'/auth/login';
+      const payload=mode==='register'?{name,email,password}:{email,password};
+      const response=await api(path,{method:'POST',body:JSON.stringify(payload)});
+      onLogin(response.user || response.agent);
+    } catch(reason){setError(reason.message);}finally{setBusy(false);}
   }
   return <div className="login-page">
-    <div className="login-header"><Brand/><span>AGENT PORTAL</span></div>
+    <div className="login-header"><Brand/><span>SECURE SUPPORT PORTAL</span></div>
     <div className="login-layout">
-      <section className="login-intro"><span className="section-label">RESOLVEHUB / SERVICE DESK</span><h1>Support, organized.</h1><p>Bring your queue, conversations, ownership, and SLA commitments into a single focused workspace.</p><div className="intro-divider"/><div className="intro-detail"><Icon name="check" size={18}/> Ticket workflows built for accountable teams</div></section>
+      <section className="login-intro"><span className="section-label">RESOLVEHUB / SERVICE DESK</span><h1>Support, organized.</h1><p>Track requests, manage conversations, and stay informed from the first response to resolution.</p><div className="intro-divider"/><div className="intro-detail"><Icon name="check" size={18}/> Secure access for customers and support teams</div></section>
       <form className="login-card" onSubmit={submit}>
-        <h2>Sign in</h2><p>Use your support agent account to continue.</p>
-        <label>Email address<input autoComplete="username" required type="email" placeholder="agent@company.com" value={email} onChange={e => setEmail(e.target.value)}/></label>
-        <label>Password<input autoComplete="current-password" required type="password" placeholder="Enter your password" value={password} onChange={e => setPassword(e.target.value)}/></label>
-        {error && <div className="inline-error" role="alert">{error}</div>}
-        <Button type="submit" disabled={busy} className="full-width">{busy ? 'Signing in…' : 'Sign in to ResolveHub'}</Button>
+        <h2>{mode==='register'?'Create customer account':'Sign in'}</h2>
+        <p>{mode==='register'?'Register to raise and track your support requests.':'Sign in with your assigned support or customer account.'}</p>
+        {mode==='register'&&<label>Your name<input autoComplete="name" required minLength={2} maxLength={120} value={name} onChange={e=>setName(e.target.value)} placeholder="Full name"/></label>}
+        <label>Email address<input autoComplete="username" required type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@company.com"/></label>
+        <label>Password<div className="login-password-field"><input autoComplete={mode==='register'?'new-password':'current-password'} required type={visible?'text':'password'} minLength={mode==='register'?12:1} value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter your password"/><button type="button" aria-label={visible?'Hide password':'Show password'} onClick={()=>setVisible(v=>!v)}>{visible?'Hide':'Show'}</button></div></label>
+        {mode==='register'&&<p className="login-hint">Use at least 12 characters.</p>}
+        {error&&<div className="inline-error" role="alert">{error}</div>}
+        <Button type="submit" disabled={busy} className="full-width">{busy?'Processing…':mode==='register'?'Create account':'Sign in to ResolveHub'}</Button>
+        <p className="login-switch">{mode==='register'?'Already have an account?':'New customer?'} <button type="button" onClick={()=>{setMode(v=>v==='register'?'login':'register');setError('');setPassword('');}}>{mode==='register'?'Sign in':'Create an account'}</button></p>
       </form>
     </div>
     <footer className="login-footer">ResolveHub · Support operations</footer>
@@ -267,9 +277,9 @@ function Dashboard({ agent, onLogout }) {
 function App() {
   const [agent, setAgent] = useState(null);
   const [checking, setChecking] = useState(true);
-  useEffect(() => { api('/auth/me').then(response => setAgent(response.agent)).catch(() => {}).finally(() => setChecking(false)); }, []);
+  useEffect(() => { api('/auth/me').then(response => setAgent(response.user || response.agent)).catch(() => {}).finally(() => setChecking(false)); }, []);
   if (checking) return <div className="boot-loading"><span className="brand-icon"><Icon name="layers"/></span><p>Loading workspace…</p></div>;
-  return agent ? <Dashboard agent={agent} onLogout={() => setAgent(null)}/> : <Login onLogin={setAgent}/>;
+  return agent ? agent.role === 'customer' ? <CustomerPortal user={agent} onLogout={async()=>{try{await api('/auth/logout',{method:'POST'});}finally{setAgent(null);}}}/> : <Dashboard agent={agent} onLogout={() => setAgent(null)}/> : <Login onLogin={setAgent}/>;
 }
 
 createRoot(document.getElementById('root')).render(<App/>);
