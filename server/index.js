@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
 import {query,transaction,initialize} from './db.js';
 import {seedDemoData} from './demo.js';
+import {issueCustomerJwt, verifyCustomerJwt} from './customer-jwt.js';
 import {newToken,digest,requireSecret} from './security.js';
 import {createRateLimiter} from './rate-limit.js';
 import {deadlines,addBusinessMinutes,businessMinutesBetween,fiveBusinessDays,budgets} from './sla.js';
@@ -23,15 +24,65 @@ const SESSION_MS=7*24*3600*1000;
 const loginLimit=createRateLimiter({limit:10,windowMs:15*60*1000});
 const publicCreateLimit=createRateLimiter({limit:15,windowMs:60*60*1000});
 const publicActionLimit=createRateLimiter({limit:100,windowMs:60*60*1000});
-async function agent(req,res,next){try{const token=req.cookies.rh_session;if(!token)throw fail(401,'Sign in required');const {rows}=await query('SELECT a.id,a.name,a.email FROM sessions s JOIN agents a ON a.id=s.agent_id WHERE s.token_hash=$1 AND s.expires_at>now()',[digest(token)]);if(!rows.length)throw fail(401,'Session expired');req.agent=rows[0];next();}catch(e){next(e);}}
+const registerLimit=createRateLimiter({limit:5,windowMs:60*60*1000});
+const customerCookie={...cookie,maxAge:SESSION_MS};
+const customerSignIn=async(res,customer)=>{const {token,jti}=issueCustomerJwt(customer.id,SESSION_MS);await query('INSERT INTO customer_sessions(token_hash,customer_id,expires_at) VALUES($1,$2,$3)',[digest(jti),customer.id,new Date(Date.now()+SESSION_MS)]);res.cookie('rh_customer',token,customerCookie);return {id:customer.id,name:customer.name,email:customer.email,role:'customer'};};
+async function customer(req,res,next){try{const claims=verifyCustomerJwt(req.cookies.rh_customer);if(!claims)throw fail(401,'Customer sign in required');const {rows}=await query('SELECT c.id,c.name,c.email FROM customers c JOIN customer_sessions s ON s.customer_id=c.id WHERE c.id=$1 AND s.token_hash=$2 AND s.expires_at>now()',[claims.sub,digest(claims.jti)]);if(!rows.length)throw fail(401,'Session expired');req.customer=rows[0];next();}catch(error){next(error);}}
+const customerRegistration=z.object({name:z.string().trim().min(2).max(120),email:z.string().trim().email().max(250),password:z.string().min(12).max(128)});
+
+async function agent(req,res,next){try{const token=req.cookies.rh_session;if(!token)throw fail(401,'Sign in required');const {rows}=await query('SELECT a.id,a.name,a.email,a.role FROM sessions s JOIN agents a ON a.id=s.agent_id WHERE s.token_hash=$1 AND s.expires_at>now()',[digest(token)]);if(!rows.length)throw fail(401,'Session expired');req.agent=rows[0];next();}catch(e){next(e);}}
 async function customerTicket(req,lock=false,db={query}){const ticketId=parse(id,req.params.id);const bearer=req.headers.authorization?.match(/^Bearer (.+)$/i)?.[1];if(!bearer)throw fail(401,'Ticket access token required');const {rows}=await db.query("SELECT * FROM tickets WHERE id=$1 AND customer_token_hash=$2 "+(lock?'FOR UPDATE':''),[ticketId,digest(bearer)]);if(!rows.length)throw fail(404,'Ticket not found');return rows[0];}
 const event=async(db,ticket,actor,actorId,type,meta={})=>db.query('INSERT INTO ticket_events(ticket_id,actor_type,actor_id,event_type,metadata) VALUES($1,$2,$3,$4,$5)',[ticket,actor,actorId,type,JSON.stringify(meta)]);
 async function details(ticketId,includeInternal=false){const [ticket,msg,events]=await Promise.all([query('SELECT t.*,a.name AS assignee_name FROM tickets t LEFT JOIN agents a ON a.id=t.assignee_id WHERE t.id=$1',[ticketId]),query('SELECT id,ticket_id,actor_type,actor_id,body,is_internal,created_at FROM messages WHERE ticket_id=$1 '+(includeInternal?'':'AND is_internal=false')+' ORDER BY created_at,id',[ticketId]),includeInternal?query('SELECT * FROM ticket_events WHERE ticket_id=$1 ORDER BY created_at,id',[ticketId]):Promise.resolve({rows:[]})]);if(!ticket.rows.length)throw fail(404,'Ticket not found');const t=ticket.rows[0];delete t.customer_token_hash;if(!includeInternal)delete t.remaining_resolution_ms;return {ticket:t,messages:msg.rows,events:events.rows};}
 app.get('/api/health',(_req,res)=>res.json({status:'ok'}));
 app.get('/api/demo/config',(_req,res)=>res.json({enabled:process.env.DEMO_MODE==='true' && !!process.env.DEMO_AGENT_PASSWORD}));
-app.post('/api/auth/login',loginLimit,asyncRoute(async(req,res)=>{const {email,password}=parse(z.object({email:z.string().email(),password:z.string().min(1)}),req.body);const {rows}=await query('SELECT * FROM agents WHERE email=$1',[email.toLowerCase()]);const valid=rows.length&&await bcrypt.compare(password,rows[0].password_hash);if(!valid)throw fail(401,'Invalid credentials');const token=newToken();await query('INSERT INTO sessions(token_hash,agent_id,expires_at) VALUES($1,$2,$3)',[digest(token),rows[0].id,new Date(Date.now()+SESSION_MS)]);res.cookie('rh_session',token,{...cookie,maxAge:SESSION_MS});res.json({agent:{id:rows[0].id,email:rows[0].email,name:rows[0].name}});}));
-app.post('/api/auth/logout',agent,asyncRoute(async(req,res)=>{await query('DELETE FROM sessions WHERE token_hash=$1',[digest(req.cookies.rh_session)]);res.clearCookie('rh_session',cookie);res.json({ok:true});}));
-app.get('/api/auth/me',agent,(req,res)=>res.json({agent:req.agent}));
+app.post('/api/auth/register',registerLimit,asyncRoute(async(req,res)=>{const input=parse(customerRegistration,req.body);const email=input.email.toLowerCase();const existing=await query('SELECT 1 FROM agents WHERE email=$1 UNION ALL SELECT 1 FROM customers WHERE email=$1 LIMIT 1',[email]);if(existing.rows.length)throw fail(409,'Account already exists');const hash=await bcrypt.hash(input.password,12);let result;try{result=await query('INSERT INTO customers(name,email,password_hash) VALUES($1,$2,$3) RETURNING id,name,email',[input.name,email,hash]);}catch(err){if(err.code==='23505')throw fail(409,'Account already exists');throw err;}const user=await customerSignIn(res,result.rows[0]);res.status(201).json({user});}));
+app.post('/api/auth/login',loginLimit,asyncRoute(async(req,res)=>{const {email,password}=parse(z.object({email:z.string().email(),password:z.string().min(1)}),req.body);const {rows}=await query('SELECT * FROM agents WHERE email=$1',[email.toLowerCase()]);const valid=rows.length&&await bcrypt.compare(password,rows[0].password_hash);if(!valid){const found=await query('SELECT id,name,email,password_hash FROM customers WHERE email=$1',[email.toLowerCase()]);if(!found.rows.length||!await bcrypt.compare(password,found.rows[0].password_hash))throw fail(401,'Invalid credentials');const user=await customerSignIn(res,found.rows[0]);return res.json({user});}const token=newToken();await query('INSERT INTO sessions(token_hash,agent_id,expires_at) VALUES($1,$2,$3)',[digest(token),rows[0].id,new Date(Date.now()+SESSION_MS)]);res.cookie('rh_session',token,{...cookie,maxAge:SESSION_MS});res.json({agent:{id:rows[0].id,email:rows[0].email,name:rows[0].name,role:rows[0].role},user:{id:rows[0].id,email:rows[0].email,name:rows[0].name,role:rows[0].role}});}));
+app.post('/api/auth/logout',asyncRoute(async(req,res)=>{if(req.cookies.rh_session)await query('DELETE FROM sessions WHERE token_hash=$1',[digest(req.cookies.rh_session)]);const claims=verifyCustomerJwt(req.cookies.rh_customer);if(claims)await query('DELETE FROM customer_sessions WHERE token_hash=$1',[digest(claims.jti)]);res.clearCookie('rh_session',cookie);res.clearCookie('rh_customer',cookie);res.json({ok:true});}));
+app.get('/api/auth/me',(req,res,next)=>{if(req.cookies.rh_session)return agent(req,res,()=>res.json({agent:req.agent,user:req.agent}));return customer(req,res,()=>res.json({user:{...req.customer,role:'customer'}}));});
+
+/* Authenticated customer operations: ownership is always checked in SQL. */
+app.get('/api/customer/tickets',customer,asyncRoute(async(req,res)=>{
+ const {rows}=await query("SELECT id,subject,category,priority,status,created_at,updated_at,first_response_due,resolution_due,resolved_at,closed_at,assignee_id FROM tickets WHERE customer_id=$1 ORDER BY created_at DESC LIMIT 250",[req.customer.id]);
+ res.json({tickets:rows});
+}));
+app.post('/api/customer/tickets',customer,publicCreateLimit,asyncRoute(async(req,res)=>{
+ const input=parse(z.object({subject:z.string().trim().min(3).max(160),description:txt,category:z.enum(['general','billing','technical','account','feature']).default('general'),priority:z.enum(['high','medium','low']).default('medium')}),req.body);
+ const d=deadlines(input.priority),token=newToken();
+ const {rows}=await transaction(async db=>{
+  const out=await db.query('INSERT INTO tickets(subject,description,category,customer_name,customer_email,customer_id,customer_token_hash,priority,first_response_due,resolution_due) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id',[input.subject,input.description,input.category,req.customer.name,req.customer.email,req.customer.id,digest(token),input.priority,d.first_response_due,d.resolution_due]);
+  await event(db,out.rows[0].id,'customer',req.customer.id,'created');
+  return out;
+ });
+ res.status(201).json({id:rows[0].id});
+}));
+async function ownedTicket(req,db=query){const ticketId=parse(id,req.params.id);const {rows}=await (typeof db==='function'?db:db.query.bind(db))('SELECT * FROM tickets WHERE id=$1 AND customer_id=$2',[ticketId,req.customer.id]);if(!rows.length)throw fail(404,'Ticket not found');return rows[0];}
+app.get('/api/customer/tickets/:id',customer,asyncRoute(async(req,res)=>{const t=await ownedTicket(req);res.json(await details(t.id,false));}));
+app.post('/api/customer/tickets/:id/reply',customer,publicActionLimit,asyncRoute(async(req,res)=>{
+ const {body}=parse(z.object({body:txt}),req.body);
+ await transaction(async db=>{
+  const t=await ownedTicket(req,db);
+  const {rows}=await db.query('SELECT * FROM tickets WHERE id=$1 FOR UPDATE',[t.id]);const locked=rows[0];
+  if(['closed','resolved'].includes(locked.status))throw fail(409,'Ticket is not active');
+  await db.query('INSERT INTO messages(ticket_id,actor_type,actor_id,body) VALUES($1,$2,$3,$4)',[t.id,'customer',req.customer.id,body]);
+  if(locked.status==='waiting'){const due=addBusinessMinutes(new Date(),Math.ceil(Number(locked.remaining_resolution_ms||0)/60000));await db.query("UPDATE tickets SET status='in_progress',waiting_since=null,remaining_resolution_ms=null,resolution_due=$2,updated_at=now() WHERE id=$1",[t.id,due]);}
+  await event(db,t.id,'customer',req.customer.id,'public_reply');
+ });
+ res.status(201).json({ok:true});
+}));
+app.post('/api/customer/tickets/:id/reopen',customer,publicActionLimit,asyncRoute(async(req,res)=>{
+ await transaction(async db=>{
+  const t=await ownedTicket(req,db);
+  const {rows}=await db.query('SELECT * FROM tickets WHERE id=$1 FOR UPDATE',[t.id]);const locked=rows[0];
+  if(locked.status!=='resolved'||!locked.resolved_at)throw fail(409,'Only resolved tickets can be reopened');
+  if(businessMinutesBetween(locked.resolved_at,new Date())>fiveBusinessDays)throw fail(409,'Reopen window expired');
+  const d=deadlines(locked.priority);
+  await db.query("UPDATE tickets SET status='in_progress',resolved_at=null,resolution_due=$2,updated_at=now() WHERE id=$1",[t.id,d.resolution_due]);
+  await event(db,t.id,'customer',req.customer.id,'reopened');
+ });
+ res.json({ok:true});
+}));
+
 app.get('/api/tickets',agent,asyncRoute(async(req,res)=>{const status=req.query.status,search=String(req.query.search||'').trim().slice(0,100);if(status&&!['open','in_progress','waiting','resolved','closed','all'].includes(status))throw fail(400,'Invalid status');const {rows}=await query("SELECT t.id,t.subject,t.customer_name,t.customer_email,t.priority,t.status,t.assignee_id,a.name AS assignee_name,t.first_response_due,t.resolution_due,t.created_at,t.updated_at FROM tickets t LEFT JOIN agents a ON a.id=t.assignee_id WHERE ($1::text IS NULL OR t.status=$1) AND ($2::text='' OR t.subject ILIKE '%'||$2||'%' OR t.customer_email ILIKE '%'||$2||'%') ORDER BY CASE WHEN t.status IN ('open','in_progress') THEN 0 ELSE 1 END,t.created_at DESC LIMIT 250",[!status||status==='all'?null:status,search]);res.json({tickets:rows});}));
 app.get('/api/tickets/:id',agent,asyncRoute(async(req,res)=>res.json(await details(parse(id,req.params.id),true))));
 async function createTicket(req,res,actor){const input=parse(ticketInput,req.body);const token=newToken(),d=deadlines(input.priority);const {rows}=await transaction(async db=>{const out=await db.query('INSERT INTO tickets(subject,description,customer_name,customer_email,customer_token_hash,priority,first_response_due,resolution_due) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',[input.subject,input.description,input.customer_name,input.customer_email.toLowerCase(),digest(token),input.priority,d.first_response_due,d.resolution_due]);await event(db,out.rows[0].id,actor,req.agent?.id||null,'created');return out;});res.status(201).json({id:rows[0].id,customer_token:token});}
