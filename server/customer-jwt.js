@@ -26,3 +26,30 @@ export function verifyCustomerJwt(token) {
     return p;
   } catch { return null; }
 }
+
+export function issueStaffJwt(id, role, lifetimeMs) {
+  if(!['agent','admin'].includes(role)) throw new Error('Invalid staff role');
+  const jti=randomBytes(32).toString('hex');
+  const body=encode({sub:String(id),role,jti,iat:Math.floor(Date.now()/1000),exp:Math.floor((Date.now()+lifetimeMs)/1000)});
+  const input=encode({alg:'HS256',typ:'JWT'})+'.'+body;
+  return {token:input+'.'+sign(input),jti};
+}
+export function verifyStaffJwt(token){
+  const claims=verifyCustomerJwtTokenParts(token);
+  return claims && ['agent','admin'].includes(claims.role) ? claims : null;
+}
+function verifyCustomerJwtTokenParts(token){
+  if(typeof token!=='string'||token.length>4096)return null;
+  const parts=token.split('.');
+  if(parts.length!==3)return null;
+  const expected=Buffer.from(sign(parts[0]+'.'+parts[1]),'base64url');
+  let supplied;
+  try{supplied=Buffer.from(parts[2],'base64url');}catch{return null;}
+  if(expected.length!==supplied.length||!timingSafeEqual(expected,supplied))return null;
+  try{
+    const header=JSON.parse(Buffer.from(parts[0],'base64url'));
+    const payload=JSON.parse(Buffer.from(parts[1],'base64url'));
+    if(header.alg!=='HS256'||!/^\d+$/.test(payload.sub)||typeof payload.jti!=='string'||!Number.isSafeInteger(payload.exp)||payload.exp<=Date.now()/1000)return null;
+    return payload;
+  }catch{return null;}
+}
