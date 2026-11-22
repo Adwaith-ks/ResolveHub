@@ -10,10 +10,11 @@ import {query,transaction,initialize} from './db.js';
 import {seedDemoData,seedDemoStaff} from './demo.js';
 import {issueCustomerJwt, verifyCustomerJwt, issueStaffJwt, verifyStaffJwt} from './customer-jwt.js';
 import {scheduleAutomaticClosure} from './closure.js';
+import {parseAttachment,attachmentDownload} from './attachments.js';
 import {newToken,digest,requireSecret} from './security.js';
 import {createRateLimiter} from './rate-limit.js';
 import {deadlines,addBusinessMinutes,businessMinutesBetween,fiveBusinessDays,budgets} from './sla.js';
-const app=express();app.disable('x-powered-by');app.use(helmet({contentSecurityPolicy:false}));app.use(express.json({limit:'32kb'}));app.use(cookieParser());
+const app=express();app.disable('x-powered-by');app.use(helmet({contentSecurityPolicy:false}));app.use(express.json({limit:'3mb'}));app.use(cookieParser());
 const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
 const fail=(status,message)=>Object.assign(new Error(message),{status});
 const parse=(schema,obj)=>{const out=schema.safeParse(obj);if(!out.success)throw fail(400,out.error.issues.map(x=>x.message).join('; '));return out.data;};
@@ -34,7 +35,7 @@ const customerRegistration=z.object({name:z.string().trim().min(2).max(120),emai
 async function agent(req,res,next){try{const token=req.cookies.rh_session;if(!token)throw fail(401,'Sign in required');const claims=verifyStaffJwt(token);const hash=claims?digest(claims.jti):digest(token);const {rows}=await query('SELECT a.id,a.name,a.email,a.role FROM sessions s JOIN agents a ON a.id=s.agent_id WHERE s.token_hash=$1 AND s.expires_at>now()',[hash]);if(!rows.length)throw fail(401,'Session expired');req.agent=rows[0];next();}catch(e){next(e);}}
 async function customerTicket(req,lock=false,db={query}){const ticketId=parse(id,req.params.id);const bearer=req.headers.authorization?.match(/^Bearer (.+)$/i)?.[1];if(!bearer)throw fail(401,'Ticket access token required');const {rows}=await db.query("SELECT * FROM tickets WHERE id=$1 AND customer_token_hash=$2 "+(lock?'FOR UPDATE':''),[ticketId,digest(bearer)]);if(!rows.length)throw fail(404,'Ticket not found');return rows[0];}
 const event=async(db,ticket,actor,actorId,type,meta={})=>db.query('INSERT INTO ticket_events(ticket_id,actor_type,actor_id,event_type,metadata) VALUES($1,$2,$3,$4,$5)',[ticket,actor,actorId,type,JSON.stringify(meta)]);
-async function details(ticketId,includeInternal=false){const [ticket,msg,events]=await Promise.all([query('SELECT t.*,a.name AS assignee_name FROM tickets t LEFT JOIN agents a ON a.id=t.assignee_id WHERE t.id=$1',[ticketId]),query('SELECT id,ticket_id,actor_type,actor_id,body,is_internal,created_at FROM messages WHERE ticket_id=$1 '+(includeInternal?'':'AND is_internal=false')+' ORDER BY created_at,id',[ticketId]),includeInternal?query('SELECT * FROM ticket_events WHERE ticket_id=$1 ORDER BY created_at,id',[ticketId]):Promise.resolve({rows:[]})]);if(!ticket.rows.length)throw fail(404,'Ticket not found');const t=ticket.rows[0];delete t.customer_token_hash;if(!includeInternal)delete t.remaining_resolution_ms;return {ticket:t,messages:msg.rows,events:events.rows};}
+async function details(ticketId,includeInternal=false){const [ticket,msg,events]=await Promise.all([query('SELECT t.*,a.name AS assignee_name FROM tickets t LEFT JOIN agents a ON a.id=t.assignee_id WHERE t.id=$1',[ticketId]),query('SELECT id,ticket_id,actor_type,actor_id,body,is_internal,created_at FROM messages WHERE ticket_id=$1 '+(includeInternal?'':'AND is_internal=false')+' ORDER BY created_at,id',[ticketId]),includeInternal?query('SELECT * FROM ticket_events WHERE ticket_id=$1 ORDER BY created_at,id',[ticketId]):Promise.resolve({rows:[]})]);if(!ticket.rows.length)throw fail(404,'Ticket not found');const attachments=await query('SELECT id,ticket_id,filename,mime_type,size_bytes,created_at FROM ticket_attachments WHERE ticket_id=$1 ORDER BY created_at,id',[ticketId]);const t=ticket.rows[0];delete t.customer_token_hash;if(!includeInternal)delete t.remaining_resolution_ms;return {ticket:t,messages:msg.rows,events:events.rows,attachments:attachments.rows};}
 app.get('/api/health',(_req,res)=>res.json({status:'ok'}));
 app.get('/api/demo/config',(_req,res)=>res.json({enabled:process.env.DEMO_MODE==='true' && !!process.env.DEMO_AGENT_PASSWORD}));
 app.post('/api/auth/register',registerLimit,asyncRoute(async(req,res)=>{const input=parse(customerRegistration,req.body);const email=input.email.toLowerCase();const existing=await query('SELECT 1 FROM agents WHERE email=$1 UNION ALL SELECT 1 FROM customers WHERE email=$1 LIMIT 1',[email]);if(existing.rows.length)throw fail(409,'Account already exists');const hash=await bcrypt.hash(input.password,12);let result;try{result=await query('INSERT INTO customers(name,email,password_hash) VALUES($1,$2,$3) RETURNING id,name,email',[input.name,email,hash]);}catch(err){if(err.code==='23505')throw fail(409,'Account already exists');throw err;}const user=await customerSignIn(res,result.rows[0]);res.status(201).json({user});}));
@@ -49,16 +50,25 @@ app.get('/api/customer/tickets',customer,asyncRoute(async(req,res)=>{
 }));
 app.post('/api/customer/tickets',customer,publicCreateLimit,asyncRoute(async(req,res)=>{
  const input=parse(z.object({subject:z.string().trim().min(3).max(160),description:txt,category:z.enum(['general','billing','technical','account','feature']).default('general'),priority:z.enum(['high','medium','low']).default('medium')}),req.body);
+ let attachment=null;
+ try{attachment=parseAttachment(req.body.attachment);}catch(error){throw fail(400,error.message);}
  const d=deadlines(input.priority),token=newToken();
  const {rows}=await transaction(async db=>{
   const out=await db.query('INSERT INTO tickets(subject,description,category,customer_name,customer_email,customer_id,customer_token_hash,priority,first_response_due,resolution_due) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id',[input.subject,input.description,input.category,req.customer.name,req.customer.email,req.customer.id,digest(token),input.priority,d.first_response_due,d.resolution_due]);
   await event(db,out.rows[0].id,'customer',req.customer.id,'created');
+  if(attachment)await db.query('INSERT INTO ticket_attachments(ticket_id,uploaded_by,filename,mime_type,content,size_bytes) VALUES($1,$2,$3,$4,$5,$6)',[out.rows[0].id,req.customer.id,attachment.filename,attachment.mime,attachment.content,attachment.size]);
   return out;
  });
  res.status(201).json({id:rows[0].id});
 }));
 async function ownedTicket(req,db=query){const ticketId=parse(id,req.params.id);const {rows}=await (typeof db==='function'?db:db.query.bind(db))('SELECT * FROM tickets WHERE id=$1 AND customer_id=$2',[ticketId,req.customer.id]);if(!rows.length)throw fail(404,'Ticket not found');return rows[0];}
 app.get('/api/customer/tickets/:id',customer,asyncRoute(async(req,res)=>{const t=await ownedTicket(req);res.json(await details(t.id,false));}));
+app.get('/api/customer/tickets/:id/attachments/:attachmentId',customer,asyncRoute(async(req,res)=>{
+ const ticket=await ownedTicket(req);
+ const {rows}=await query('SELECT filename,mime_type,content FROM ticket_attachments WHERE ticket_id=$1 AND id=$2',[ticket.id,parse(id,req.params.attachmentId)]);
+ if(!rows.length)throw fail(404,'Attachment not found');
+ attachmentDownload(res,rows[0]);
+}));
 app.post('/api/customer/tickets/:id/reply',customer,publicActionLimit,asyncRoute(async(req,res)=>{
  const {body}=parse(z.object({body:txt}),req.body);
  await transaction(async db=>{
@@ -91,6 +101,13 @@ app.get('/api/admin/agents',agent,asyncRoute(async(req,res)=>{
 }));
 app.get('/api/tickets',agent,asyncRoute(async(req,res)=>{const status=req.query.status,search=String(req.query.search||'').trim().slice(0,100);if(status&&!['open','in_progress','waiting','resolved','closed','all'].includes(status))throw fail(400,'Invalid status');const {rows}=await query("SELECT t.id,t.subject,t.customer_name,t.customer_email,t.priority,t.status,t.assignee_id,a.name AS assignee_name,t.first_response_due,t.resolution_due,t.created_at,t.updated_at FROM tickets t LEFT JOIN agents a ON a.id=t.assignee_id WHERE ($1::text IS NULL OR t.status=$1) AND ($2::text='' OR t.subject ILIKE '%'||$2||'%' OR t.customer_email ILIKE '%'||$2||'%') ORDER BY CASE WHEN t.status IN ('open','in_progress') THEN 0 ELSE 1 END,t.created_at DESC LIMIT 250",[!status||status==='all'?null:status,search]);res.json({tickets:rows});}));
 app.get('/api/tickets/:id',agent,asyncRoute(async(req,res)=>res.json(await details(parse(id,req.params.id),true))));
+app.get('/api/tickets/:id/attachments/:attachmentId',agent,asyncRoute(async(req,res)=>{
+ const ticketId=parse(id,req.params.id);
+ const {rows}=await query('SELECT filename,mime_type,content FROM ticket_attachments WHERE ticket_id=$1 AND id=$2',[ticketId,parse(id,req.params.attachmentId)]);
+ if(!rows.length)throw fail(404,'Attachment not found');
+ attachmentDownload(res,rows[0]);
+}));
+
 async function createTicket(req,res,actor){const input=parse(ticketInput,req.body);const token=newToken(),d=deadlines(input.priority);const {rows}=await transaction(async db=>{const out=await db.query('INSERT INTO tickets(subject,description,customer_name,customer_email,customer_token_hash,priority,first_response_due,resolution_due) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',[input.subject,input.description,input.customer_name,input.customer_email.toLowerCase(),digest(token),input.priority,d.first_response_due,d.resolution_due]);await event(db,out.rows[0].id,actor,req.agent?.id||null,'created');return out;});res.status(201).json({id:rows[0].id,customer_token:token});}
 app.post('/api/tickets',agent,asyncRoute((req,res)=>createTicket(req,res,'agent')));
 app.post('/api/public/tickets',publicCreateLimit,asyncRoute((req,res)=>createTicket(req,res,'customer')));
