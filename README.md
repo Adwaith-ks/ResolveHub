@@ -103,7 +103,7 @@ The root `render.yaml` Blueprint deploys `resolvehub-app` (Express serving the R
 
 Sync the Blueprint to apply environment configuration changes, then inspect the web-service deployment and logs. New commits to `main` trigger deployments when auto-deploy is enabled. Render free-plan instances can sleep; verify current plan restrictions and database retention before committing important customer data.
 
-To check availability, run `npm run smoke:deploy`; or use **GitHub Actions → Deployment smoke check**. This verifies homepage, health API and unauthenticated access denial, not full production database workflows.
+To check availability, run `npm run smoke:deploy`; or use **GitHub Actions → Deployment smoke check**. This verifies homepage, health API, PostgreSQL readiness (`GET /api/ready`), and unauthenticated access denial, not full production database workflows.
 
 ## Known limitations / future work
 
@@ -113,5 +113,5 @@ To check availability, run `npm run smoke:deploy`; or use **GitHub Actions → D
 - Admins can monitor staff, but staff creation/editing is currently via seed/configuration rather than an admin settings UI.
 - The schema uses additive startup SQL, not versioned production migration tooling.
 - Automatic closure runs inside the web process. For robust scheduling across outages, use a separate scheduled worker.
-- The health endpoint reports API liveness, not database readiness. Use authenticated end-to-end tests and backups before real customer use.
+- The health endpoint reports API liveness; `/api/ready` checks database connectivity but does not exercise the full ticket workflow. Use authenticated end-to-end tests and backups before real customer use.
 - Some original ambiguous SLA rules are documented above and should be approved by Arvo before production use.
